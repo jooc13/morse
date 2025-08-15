@@ -1,0 +1,27 @@
+apiVersion: v2
+name: morse
+description: A Helm chart for Morse workout tracking application
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+keywords:
+  - fitness
+  - workout
+  - ai
+  - voice
+  - transcription
+
+maintainers:
+  - name: Morse Team
+    email: team@morse.app
+
+dependencies:
+  - name: postgresql
+    version: 12.1.9
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: 17.3.7
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
