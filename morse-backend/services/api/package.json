@@ -1,0 +1,43 @@
+{
+  "name": "morse-api",
+  "version": "1.0.0",
+  "description": "Morse API service for workout tracking",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.11.0",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "compression": "^1.7.4",
+    "dotenv": "^16.0.3",
+    "uuid": "^9.0.0",
+    "bull": "^4.10.4",
+    "redis": "^4.6.7",
+    "express-rate-limit": "^6.7.0",
+    "morgan": "^1.10.0",
+    "axios": "^1.4.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22",
+    "jest": "^29.5.0",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "workout",
+    "fitness",
+    "api",
+    "audio",
+    "transcription"
+  ],
+  "author": "Morse Team",
+  "license": "MIT"
+}
