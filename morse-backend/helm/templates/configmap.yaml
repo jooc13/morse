@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "morse.fullname" . }}-config
+  labels:
+    {{- include "morse.labels" . | nindent 4 }}
+data:
+  # API Configuration
+  API_NODE_ENV: {{ .Values.api.env.NODE_ENV | quote }}
+  API_PORT: {{ .Values.api.env.PORT | quote }}
+  
+  # Worker Configuration
+  WHISPER_MODEL: {{ .Values.worker.env.WHISPER_MODEL | quote }}
+  
+  # Redis Configuration
+  REDIS_HOST: {{ include "morse.redis.host" . | quote }}
+  REDIS_PORT: {{ include "morse.redis.port" . | quote }}
+  
+  # Upload Configuration
+  UPLOAD_DIR: "/app/uploads"
