@@ -32,6 +32,56 @@ api.interceptors.response.use(
 );
 
 const apiService = {
+  // Set authentication token
+  setAuthToken(token) {
+    if (token) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      console.log('Token set:', token.substring(0, 20) + '...');
+    } else {
+      delete api.defaults.headers.common['Authorization'];
+      console.log('Token cleared');
+    }
+  },
+
+  // Authentication endpoints
+  async register(passphrase) {
+    const response = await api.post('/auth/register', { passphrase });
+    return response.data;
+  },
+
+  async login(passphrase) {
+    const response = await api.post('/auth/login', { passphrase });
+    return response.data;
+  },
+
+  async getUserProfile() {
+    const response = await api.get('/auth/profile');
+    return response.data;
+  },
+
+  // Device search and claiming
+  async searchDevices(last4) {
+    const response = await api.get(`/auth/devices/search/${last4}`);
+    return response.data;
+  },
+
+  async getUnclaimedWorkouts(deviceUuid) {
+    const response = await api.get(`/auth/devices/${deviceUuid}/workouts`);
+    return response.data;
+  },
+
+  async claimWorkout(workoutId) {
+    const response = await api.post(`/auth/workouts/${workoutId}/claim`);
+    return response.data;
+  },
+
+  async getClaimedWorkouts(options = {}) {
+    const { limit = 20, offset = 0 } = options;
+    const response = await api.get(`/auth/workouts/claimed?limit=${limit}&offset=${offset}`);
+    return response.data;
+  },
+
+  // Legacy upload endpoint (for testing)
   async uploadAudio(file) {
     const formData = new FormData();
     formData.append('audio', file);
@@ -55,6 +105,7 @@ const apiService = {
     return response.data;
   },
 
+  // Legacy workout endpoints (kept for backward compatibility)
   async getWorkouts(deviceUuid, options = {}) {
     const { limit = 20, offset = 0, startDate, endDate } = options;
     
@@ -110,6 +161,47 @@ const apiService = {
   async getLLMSummary(deviceUuid, options = {}) {
     const { days = 30 } = options;
     const response = await api.get(`/workouts/${deviceUuid}/llm-summary?days=${days}`);
+    return response.data;
+  },
+
+  // Teams endpoints
+  async createTeam(teamData) {
+    const response = await api.post('/teams/create', teamData);
+    return response.data;
+  },
+
+  async joinTeam(inviteCode, displayName = null) {
+    const response = await api.post(`/teams/join/${inviteCode}`, { displayName });
+    return response.data;
+  },
+
+  async getMyTeams() {
+    const response = await api.get('/teams/my-teams');
+    return response.data;
+  },
+
+  async getTeamDetails(teamId) {
+    const response = await api.get(`/teams/${teamId}`);
+    return response.data;
+  },
+
+  async getTeamMembers(teamId) {
+    const response = await api.get(`/teams/${teamId}/members`);
+    return response.data;
+  },
+
+  async updateTeamSettings(teamId, settings) {
+    const response = await api.put(`/teams/${teamId}/settings`, settings);
+    return response.data;
+  },
+
+  async updateMyDisplayName(teamId, displayName) {
+    const response = await api.put(`/teams/${teamId}/my-display-name`, { displayName });
+    return response.data;
+  },
+
+  async leaveTeam(teamId) {
+    const response = await api.delete(`/teams/${teamId}/leave`);
     return response.data;
   },
 };

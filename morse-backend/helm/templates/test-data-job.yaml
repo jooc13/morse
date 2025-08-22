@@ -1,0 +1,117 @@
+{{- if .Values.env.populateTestData }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "morse.fullname" . }}-test-data
+  labels:
+    {{- include "morse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test-data
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "morse.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: test-data
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: test-data-migration
+        image: postgres:15-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for database to be ready..."
+          sleep 60
+          echo "Populating test data..."
+          
+          PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" << 'EOF'
+          
+          -- Add missing column if it doesn't exist
+          ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS transcription_text TEXT;
+          
+          -- Insert test users with predictable UUIDs for device search testing
+          INSERT INTO users (device_uuid, created_at) VALUES 
+          ('f47ac10b-58cc-4372-a567-0e02b2c4c4a9', NOW() - INTERVAL '7 days'),
+          ('a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d', NOW() - INTERVAL '5 days'),
+          ('9876543f-210a-4bcd-ef12-3456789abc12', NOW() - INTERVAL '3 days'),
+          ('deadbeef-cafe-4bad-face-123456789012', NOW() - INTERVAL '2 days'),
+          ('12345678-90ab-4cde-f123-456789abcdef', NOW() - INTERVAL '1 day')
+          ON CONFLICT (device_uuid) DO NOTHING;
+
+          -- Add some sample audio files for the test devices
+          INSERT INTO audio_files (
+              user_id, 
+              original_filename, 
+              file_path, 
+              file_size, 
+              upload_timestamp, 
+              transcription_status,
+              transcription_text
+          )
+          SELECT 
+              u.id,
+              u.device_uuid || '_' || extract(epoch from NOW())::bigint || '.mp3',
+              '/uploads/test_' || u.device_uuid || '.mp3',
+              2000000,
+              NOW() - INTERVAL '1 hour',
+              'completed',
+              'Test transcription for device ' || u.device_uuid || '. Sample workout data for testing.'
+          FROM users u
+          WHERE u.device_uuid IN (
+              'f47ac10b-58cc-4372-a567-0e02b2c4c4a9',
+              'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+              '9876543f-210a-4bcd-ef12-3456789abc12'
+          )
+          ON CONFLICT DO NOTHING;
+
+          -- Create some test workouts
+          INSERT INTO workouts (
+              user_id,
+              audio_file_id,
+              workout_date,
+              workout_start_time,
+              workout_duration_minutes,
+              total_exercises,
+              notes,
+              claim_status
+          )
+          SELECT 
+              af.user_id,
+              af.id,
+              CURRENT_DATE,
+              '09:00:00'::time,
+              45,
+              5,
+              'Test workout for device search functionality',
+              'unclaimed'
+          FROM audio_files af
+          JOIN users u ON af.user_id = u.id
+          WHERE u.device_uuid IN (
+              'f47ac10b-58cc-4372-a567-0e02b2c4c4a9',
+              'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+              '9876543f-210a-4bcd-ef12-3456789abc12'
+          )
+          ON CONFLICT DO NOTHING;
+
+          \echo 'Test data populated successfully. Use device search with: c4a9, 4c5d, bc12, 9012, cdef';
+          
+          EOF
+          
+          echo "Test data migration completed."
+        env:
+        - name: POSTGRES_HOST
+          value: {{ include "morse.fullname" . }}-postgresql
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: {{ .Values.postgresql.auth.database }}
+        - name: POSTGRES_USER
+          value: {{ .Values.postgresql.auth.username }}
+        - name: POSTGRES_PASSWORD
+          value: {{ .Values.postgresql.auth.password }}
+{{- end }}

@@ -1,0 +1,438 @@
+# Updated values for session grouping deployment
+api:
+  image:
+    tag: "session-grouping"
+
+worker:
+  image:
+    tag: "session-grouping"
+
+# Bump chart version for the upgrade
+appVersion: "1.1.0"
+
+# Add session-specific environment variables
+env:
+  # Session detection configuration
+  SESSION_TIMEOUT_MINUTES: "60"
+  AUTO_COMPLETE_SESSIONS: "true"
+  
+# Database migrations will be handled by the init container
+postgresql:
+  primary:
+    initdb:
+      scripts:
+        001_initial_schema.sql: |
+          -- Initial database schema for Morse workout tracking application
+
+          -- Extension for UUID generation
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+          -- Users table (device-based authentication)
+          CREATE TABLE users (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              device_uuid VARCHAR(255) UNIQUE NOT NULL,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              total_workouts INTEGER DEFAULT 0
+          );
+
+          -- Audio files table
+          CREATE TABLE audio_files (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              original_filename VARCHAR(255) NOT NULL,
+              file_path VARCHAR(500) NOT NULL,
+              file_size BIGINT NOT NULL,
+              duration_seconds DECIMAL(10,2),
+              upload_timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              processed BOOLEAN DEFAULT FALSE,
+              transcription_status VARCHAR(50) DEFAULT 'pending', -- pending, processing, completed, failed
+              session_id UUID -- Will be added by migration
+          );
+
+          -- Transcriptions table
+          CREATE TABLE transcriptions (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+              raw_text TEXT NOT NULL,
+              confidence_score DECIMAL(3,2),
+              processing_time_seconds DECIMAL(10,2),
+              processing_time_ms DECIMAL(10,2),
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Workouts table
+          CREATE TABLE workouts (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              audio_file_id UUID REFERENCES audio_files(id) ON DELETE CASCADE,
+              transcription_id UUID REFERENCES transcriptions(id) ON DELETE SET NULL,
+              session_id UUID, -- Will be added by migration
+              workout_date DATE NOT NULL,
+              workout_start_time TIME,
+              workout_duration_minutes INTEGER,
+              total_exercises INTEGER DEFAULT 0,
+              notes TEXT,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Exercises table
+          CREATE TABLE exercises (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              workout_id UUID NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+              exercise_name VARCHAR(255) NOT NULL,
+              exercise_type VARCHAR(100), -- strength, cardio, flexibility, etc.
+              muscle_groups TEXT[], -- array of muscle groups
+              sets INTEGER,
+              reps INTEGER[],
+              weight_lbs DECIMAL[],
+              duration_minutes DECIMAL(10,2),
+              distance_miles DECIMAL(10,2),
+              effort_level INTEGER CHECK (effort_level >= 1 AND effort_level <= 10),
+              rest_seconds INTEGER,
+              notes TEXT,
+              order_in_workout INTEGER,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- User progress tracking table
+          CREATE TABLE user_progress (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              workout_id UUID NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+              exercise_name VARCHAR(255) NOT NULL,
+              metric_type VARCHAR(50) NOT NULL, -- weight, reps, duration, distance, etc.
+              metric_value DECIMAL(10,2) NOT NULL,
+              recorded_date DATE NOT NULL,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Indexes for efficient queries
+          CREATE INDEX idx_audio_files_user_id ON audio_files(user_id);
+          CREATE INDEX idx_audio_files_processed ON audio_files(processed);
+          CREATE INDEX idx_audio_files_upload_timestamp ON audio_files(upload_timestamp);
+          CREATE INDEX idx_users_device_uuid ON users(device_uuid);
+          CREATE INDEX idx_transcriptions_audio_file_id ON transcriptions(audio_file_id);
+          CREATE INDEX idx_workouts_user_id ON workouts(user_id);
+          CREATE INDEX idx_workouts_date ON workouts(workout_date);
+          CREATE INDEX idx_exercises_workout_id ON exercises(workout_id);
+          CREATE INDEX idx_exercises_name ON exercises(exercise_name);
+          CREATE INDEX idx_exercises_muscle_groups ON exercises USING GIN(muscle_groups);
+          CREATE INDEX idx_user_progress_user_id ON user_progress(user_id);
+          CREATE INDEX idx_user_progress_exercise ON user_progress(exercise_name);
+          CREATE INDEX idx_user_progress_date ON user_progress(recorded_date);
+          CREATE INDEX idx_audio_files_transcription_status ON audio_files(transcription_status);
+        002_workout_tables.sql: |
+          -- Workout and exercise data tables
+
+          -- Transcriptions table
+          CREATE TABLE IF NOT EXISTS transcriptions (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+              raw_text TEXT NOT NULL,
+              confidence_score DECIMAL(5,4),
+              processing_time_ms INTEGER,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Workouts table
+          CREATE TABLE IF NOT EXISTS workouts (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+              transcription_id UUID NOT NULL REFERENCES transcriptions(id) ON DELETE CASCADE,
+              workout_date DATE NOT NULL,
+              workout_start_time TIME,
+              workout_duration_minutes INTEGER,
+              total_exercises INTEGER DEFAULT 0,
+              notes TEXT,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Exercises table
+          CREATE TABLE IF NOT EXISTS exercises (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              workout_id UUID NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+              exercise_name VARCHAR(255) NOT NULL,
+              exercise_type VARCHAR(100), -- strength, cardio, flexibility, etc.
+              muscle_groups TEXT[], -- array of muscle groups
+              sets INTEGER,
+              reps INTEGER[],
+              weight_lbs DECIMAL[],
+              duration_minutes DECIMAL(8,2),
+              distance_miles DECIMAL(8,2),
+              effort_level INTEGER CHECK (effort_level >= 1 AND effort_level <= 10),
+              rest_seconds INTEGER,
+              notes TEXT,
+              order_in_workout INTEGER,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Exercise templates/library for consistency
+          CREATE TABLE IF NOT EXISTS exercise_library (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              name VARCHAR(255) UNIQUE NOT NULL,
+              category VARCHAR(100),
+              primary_muscle_groups TEXT[],
+              secondary_muscle_groups TEXT[],
+              equipment_needed TEXT[],
+              instructions TEXT,
+              difficulty_level INTEGER CHECK (difficulty_level >= 1 AND difficulty_level <= 5),
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- User progress tracking
+          CREATE TABLE IF NOT EXISTS user_progress (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              exercise_name VARCHAR(255) NOT NULL,
+              metric_type VARCHAR(50) NOT NULL, -- weight, reps, duration, distance
+              metric_value DECIMAL(10,2) NOT NULL,
+              recorded_date DATE NOT NULL,
+              workout_id UUID REFERENCES workouts(id),
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Indexes for performance
+          CREATE INDEX IF NOT EXISTS idx_transcriptions_audio_file_id ON transcriptions(audio_file_id);
+          CREATE INDEX IF NOT EXISTS idx_workouts_user_id ON workouts(user_id);
+          CREATE INDEX IF NOT EXISTS idx_workouts_date ON workouts(workout_date);
+          CREATE INDEX IF NOT EXISTS idx_exercises_workout_id ON exercises(workout_id);
+          CREATE INDEX IF NOT EXISTS idx_exercises_name ON exercises(exercise_name);
+          CREATE INDEX IF NOT EXISTS idx_user_progress_user_id ON user_progress(user_id);
+          CREATE INDEX IF NOT EXISTS idx_user_progress_exercise ON user_progress(exercise_name);
+          CREATE INDEX IF NOT EXISTS idx_user_progress_date ON user_progress(recorded_date);
+
+          -- Insert some common exercises into the library
+          INSERT INTO exercise_library (name, category, primary_muscle_groups, secondary_muscle_groups, difficulty_level) VALUES
+          ('Push-ups', 'Bodyweight', ARRAY['Chest', 'Triceps'], ARRAY['Shoulders', 'Core'], 2),
+          ('Pull-ups', 'Bodyweight', ARRAY['Lats', 'Biceps'], ARRAY['Rhomboids', 'Middle traps'], 4),
+          ('Squats', 'Bodyweight', ARRAY['Quadriceps', 'Glutes'], ARRAY['Hamstrings', 'Calves'], 2),
+          ('Deadlifts', 'Barbell', ARRAY['Hamstrings', 'Glutes', 'Lower back'], ARRAY['Traps', 'Rhomboids'], 4),
+          ('Bench Press', 'Barbell', ARRAY['Chest', 'Triceps'], ARRAY['Shoulders'], 3),
+          ('Bicep Curls', 'Dumbbell', ARRAY['Biceps'], ARRAY['Forearms'], 2),
+          ('Plank', 'Bodyweight', ARRAY['Core'], ARRAY['Shoulders'], 2),
+          ('Running', 'Cardio', ARRAY['Legs'], ARRAY['Core', 'Cardiovascular'], 2),
+          ('Overhead Press', 'Barbell', ARRAY['Shoulders', 'Triceps'], ARRAY['Core'], 3),
+          ('Rows', 'Barbell', ARRAY['Lats', 'Rhomboids'], ARRAY['Biceps', 'Middle traps'], 3)
+          ON CONFLICT (name) DO NOTHING;
+        003_workout_sessions.sql: |
+          -- Workout Session Grouping Migration
+          -- This migration enables intelligent grouping of multiple audio recordings into single workout sessions
+
+          -- First, create the new workout_sessions table
+          CREATE TABLE IF NOT EXISTS workout_sessions (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              session_date DATE NOT NULL,
+              session_start_time TIMESTAMP WITH TIME ZONE,
+              session_end_time TIMESTAMP WITH TIME ZONE,
+              session_duration_minutes INTEGER,
+              total_recordings INTEGER DEFAULT 0,
+              total_exercises INTEGER DEFAULT 0,
+              session_status VARCHAR(50) DEFAULT 'pending', -- pending, processing, completed, failed
+              notes TEXT,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Create junction table for audio files to session relationship
+          CREATE TABLE IF NOT EXISTS session_audio_files (
+              session_id UUID NOT NULL REFERENCES workout_sessions(id) ON DELETE CASCADE,
+              audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+              recording_order INTEGER NOT NULL,
+              time_offset_minutes DECIMAL(8,2), -- minutes from session start
+              PRIMARY KEY (session_id, audio_file_id)
+          );
+
+          -- Update workouts table to reference sessions instead of individual audio files
+          DO $$ 
+          BEGIN
+              IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='workouts' AND column_name='session_id') THEN
+                  ALTER TABLE workouts ADD COLUMN session_id UUID REFERENCES workout_sessions(id) ON DELETE CASCADE;
+              END IF;
+          END $$;
+
+          -- Add session_id to audio_files if not exists
+          DO $$ 
+          BEGIN
+              IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audio_files' AND column_name='session_id') THEN
+                  ALTER TABLE audio_files ADD COLUMN session_id UUID REFERENCES workout_sessions(id);
+              END IF;
+          END $$;
+
+          -- Create indexes for performance
+          CREATE INDEX IF NOT EXISTS idx_workout_sessions_user_id ON workout_sessions(user_id);
+          CREATE INDEX IF NOT EXISTS idx_workout_sessions_date ON workout_sessions(session_date);
+          CREATE INDEX IF NOT EXISTS idx_workout_sessions_status ON workout_sessions(session_status);
+          CREATE INDEX IF NOT EXISTS idx_session_audio_files_session_id ON session_audio_files(session_id);
+          CREATE INDEX IF NOT EXISTS idx_session_audio_files_audio_file_id ON session_audio_files(audio_file_id);
+          CREATE INDEX IF NOT EXISTS idx_workouts_session_id ON workouts(session_id);
+          CREATE INDEX IF NOT EXISTS idx_audio_files_session_id ON audio_files(session_id);
+
+          -- Add trigger to update session updated_at timestamp
+          CREATE OR REPLACE FUNCTION update_session_updated_at()
+          RETURNS TRIGGER AS $$
+          BEGIN
+              NEW.updated_at = CURRENT_TIMESTAMP;
+              RETURN NEW;
+          END;
+          $$ LANGUAGE plpgsql;
+
+          DROP TRIGGER IF EXISTS trigger_update_session_updated_at ON workout_sessions;
+          CREATE TRIGGER trigger_update_session_updated_at
+              BEFORE UPDATE ON workout_sessions
+              FOR EACH ROW
+              EXECUTE FUNCTION update_session_updated_at();
+
+          -- Add session detection configuration table
+          CREATE TABLE IF NOT EXISTS session_detection_config (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+              session_timeout_minutes INTEGER DEFAULT 60, -- max gap between recordings in same session
+              min_session_recordings INTEGER DEFAULT 1,
+              auto_complete_sessions BOOLEAN DEFAULT true,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Insert default configuration for existing users
+          INSERT INTO session_detection_config (user_id)
+          SELECT id FROM users
+          WHERE id NOT IN (SELECT user_id FROM session_detection_config WHERE user_id IS NOT NULL);
+
+          -- Create function to detect potential session groupings
+          CREATE OR REPLACE FUNCTION detect_session_candidates(
+              p_user_id UUID,
+              p_audio_file_id UUID,
+              p_upload_timestamp TIMESTAMP WITH TIME ZONE,
+              p_timeout_minutes INTEGER DEFAULT 60
+          )
+          RETURNS TABLE(
+              candidate_session_id UUID,
+              time_gap_minutes DECIMAL
+          ) AS $$
+          BEGIN
+              RETURN QUERY
+              SELECT 
+                  ws.id as candidate_session_id,
+                  EXTRACT(EPOCH FROM (p_upload_timestamp - ws.session_end_time)) / 60.0 as time_gap_minutes
+              FROM workout_sessions ws
+              WHERE ws.user_id = p_user_id
+                  AND ws.session_status IN ('pending', 'processing')
+                  AND DATE(ws.session_date) = DATE(p_upload_timestamp)
+                  AND EXTRACT(EPOCH FROM (p_upload_timestamp - ws.session_end_time)) / 60.0 <= p_timeout_minutes
+              ORDER BY ws.session_end_time DESC
+              LIMIT 1;
+          END;
+          $$ LANGUAGE plpgsql;
+
+          -- Create stored procedure to add audio file to session
+          CREATE OR REPLACE FUNCTION add_audio_to_session(
+              p_session_id UUID,
+              p_audio_file_id UUID,
+              p_upload_timestamp TIMESTAMP WITH TIME ZONE
+          )
+          RETURNS VOID AS $$
+          DECLARE
+              v_recording_order INTEGER;
+              v_time_offset DECIMAL(8,2);
+              v_session_start TIMESTAMP WITH TIME ZONE;
+          BEGIN
+              -- Get current recording order
+              SELECT COALESCE(MAX(recording_order), 0) + 1
+              INTO v_recording_order
+              FROM session_audio_files
+              WHERE session_id = p_session_id;
+              
+              -- Get session start time for offset calculation
+              SELECT session_start_time INTO v_session_start
+              FROM workout_sessions
+              WHERE id = p_session_id;
+              
+              -- Calculate time offset from session start
+              v_time_offset := EXTRACT(EPOCH FROM (p_upload_timestamp - v_session_start)) / 60.0;
+              
+              -- Insert audio file into session
+              INSERT INTO session_audio_files (session_id, audio_file_id, recording_order, time_offset_minutes)
+              VALUES (p_session_id, p_audio_file_id, v_recording_order, v_time_offset);
+              
+              -- Update session metadata
+              UPDATE workout_sessions 
+              SET 
+                  total_recordings = total_recordings + 1,
+                  session_end_time = GREATEST(session_end_time, p_upload_timestamp),
+                  session_duration_minutes = EXTRACT(EPOCH FROM (GREATEST(session_end_time, p_upload_timestamp) - session_start_time)) / 60.0,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = p_session_id;
+          END;
+          $$ LANGUAGE plpgsql;
+
+          -- Create function to create new session
+          CREATE OR REPLACE FUNCTION create_new_session(
+              p_user_id UUID,
+              p_audio_file_id UUID,
+              p_upload_timestamp TIMESTAMP WITH TIME ZONE
+          )
+          RETURNS UUID AS $$
+          DECLARE
+              v_session_id UUID;
+          BEGIN
+              -- Create new session
+              INSERT INTO workout_sessions (
+                  user_id, 
+                  session_date, 
+                  session_start_time, 
+                  session_end_time,
+                  session_duration_minutes,
+                  total_recordings
+              )
+              VALUES (
+                  p_user_id,
+                  DATE(p_upload_timestamp),
+                  p_upload_timestamp,
+                  p_upload_timestamp,
+                  0,
+                  1
+              )
+              RETURNING id INTO v_session_id;
+              
+              -- Add audio file to session
+              INSERT INTO session_audio_files (session_id, audio_file_id, recording_order, time_offset_minutes)
+              VALUES (v_session_id, p_audio_file_id, 1, 0);
+              
+              RETURN v_session_id;
+          END;
+          $$ LANGUAGE plpgsql;
+
+          -- Create view for session summaries
+          DROP VIEW IF EXISTS session_summaries;
+          CREATE VIEW session_summaries AS
+          SELECT 
+              ws.id,
+              ws.user_id,
+              ws.session_date,
+              ws.session_start_time,
+              ws.session_end_time,
+              ws.session_duration_minutes,
+              ws.total_recordings,
+              ws.total_exercises,
+              ws.session_status,
+              ws.notes,
+              COALESCE(
+                  json_agg(
+                      json_build_object(
+                          'audio_file_id', saf.audio_file_id,
+                          'original_filename', af.original_filename,
+                          'recording_order', saf.recording_order,
+                          'time_offset_minutes', saf.time_offset_minutes,
+                          'transcription_status', af.transcription_status
+                      ) ORDER BY saf.recording_order
+                  ) FILTER (WHERE saf.audio_file_id IS NOT NULL),
+                  '[]'::json
+              ) as audio_files
+          FROM workout_sessions ws
+          LEFT JOIN session_audio_files saf ON ws.id = saf.session_id
+          LEFT JOIN audio_files af ON saf.audio_file_id = af.id
+          GROUP BY ws.id, ws.user_id, ws.session_date, ws.session_start_time, 
+                   ws.session_end_time, ws.session_duration_minutes, ws.total_recordings, 
+                   ws.total_exercises, ws.session_status, ws.notes;

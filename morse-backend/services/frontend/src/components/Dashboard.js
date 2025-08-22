@@ -9,45 +9,35 @@ import {
   Box,
   Button,
   Chip,
-  List,
-  ListItem,
-  ListItemText,
   LinearProgress,
   Alert
 } from '@mui/material';
 import {
   FitnessCenter,
-  TrendingUp,
-  Timer,
-  CalendarToday,
-  Upload as UploadIcon
+  Search,
+  Assignment,
+  AccountCircle,
+  Devices,
+  CloudUpload,
+  Groups
 } from '@mui/icons-material';
 import api from '../services/api';
-import WorkoutCharts from './WorkoutCharts';
 
-const Dashboard = ({ deviceUuid, userStats, onStatsUpdate }) => {
+const Dashboard = ({ user, userProfile, onProfileUpdate }) => {
   const navigate = useNavigate();
-  const [recentWorkouts, setRecentWorkouts] = useState([]);
   const [queueStats, setQueueStats] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadDashboardData();
     const interval = setInterval(loadQueueStats, 10000); // Update queue stats every 10 seconds
     return () => clearInterval(interval);
-  }, [deviceUuid]);
+  }, []);
 
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      const [workoutsData, queueData] = await Promise.all([
-        api.getWorkouts(deviceUuid, { limit: 5 }),
-        api.getQueueStats()
-      ]);
-      
-      setRecentWorkouts(workoutsData.workouts || []);
+      const queueData = await api.getQueueStats();
       setQueueStats(queueData);
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
@@ -65,55 +55,8 @@ const Dashboard = ({ deviceUuid, userStats, onStatsUpdate }) => {
     }
   };
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.name.endsWith('.mp3')) {
-      setUploadStatus({ type: 'error', message: 'Please select an MP3 file' });
-      return;
-    }
-
-    // Generate a test filename with current timestamp
-    const timestamp = Date.now();
-    const testFilename = `${deviceUuid}_${timestamp}.mp3`;
-    
-    // Create a new file with the correct name
-    const renamedFile = new File([file], testFilename, { type: file.type });
-
-    try {
-      setUploading(true);
-      setUploadStatus({ type: 'info', message: 'Uploading audio file...' });
-      
-      const result = await api.uploadAudio(renamedFile);
-      
-      setUploadStatus({ 
-        type: 'success', 
-        message: `File uploaded successfully! Processing started.` 
-      });
-      
-      // Refresh data
-      setTimeout(() => {
-        loadDashboardData();
-        onStatsUpdate();
-      }, 1000);
-      
-      // Clear status after 5 seconds
-      setTimeout(() => setUploadStatus(null), 5000);
-      
-    } catch (error) {
-      setUploadStatus({ 
-        type: 'error', 
-        message: `Upload failed: ${error.response?.data?.error || error.message}` 
-      });
-    } finally {
-      setUploading(false);
-      event.target.value = ''; // Clear file input
-    }
-  };
-
   const formatDate = (dateString) => {
+    if (!dateString) return 'Never';
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -121,32 +64,82 @@ const Dashboard = ({ deviceUuid, userStats, onStatsUpdate }) => {
     });
   };
 
-  const formatDuration = (minutes) => {
-    if (!minutes) return 'N/A';
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-  };
-
-  const StatCard = ({ title, value, icon, subtitle, color = 'primary' }) => (
-    <Card sx={{ height: '100%' }}>
-      <CardContent>
+  const StatCard = ({ title, value, icon, subtitle, color = 'primary', onClick }) => (
+    <Card 
+      sx={{ 
+        height: '100%', 
+        cursor: onClick ? 'pointer' : 'default',
+        background: 'linear-gradient(135deg, rgba(26, 26, 26, 0.6) 0%, rgba(26, 26, 26, 0.8) 100%)',
+        backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: 2,
+        transition: 'all 0.3s ease',
+        '&:hover': onClick ? { 
+          transform: 'translateY(-4px)',
+          boxShadow: '0 8px 32px rgba(0, 229, 255, 0.15)',
+          border: '1px solid rgba(0, 229, 255, 0.3)',
+        } : {}
+      }}
+      onClick={onClick}
+    >
+      <CardContent sx={{ p: 3 }}>
         <Box display="flex" alignItems="center" justifyContent="space-between">
           <Box>
-            <Typography color="textSecondary" gutterBottom variant="body2">
+            <Typography 
+              color="text.secondary" 
+              gutterBottom 
+              variant="body2"
+              sx={{ 
+                fontSize: '0.875rem',
+                fontWeight: 500,
+                opacity: 0.7,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }}
+            >
               {title}
             </Typography>
-            <Typography variant="h4" component="div" color={color}>
+            <Typography 
+              variant="h3" 
+              component="div" 
+              sx={{ 
+                fontWeight: 700,
+                fontSize: '2.5rem',
+                background: color === 'primary' 
+                  ? 'linear-gradient(135deg, #00e5ff 0%, #0288d1 100%)'
+                  : color === 'secondary'
+                  ? 'linear-gradient(135deg, #ff6b6b 0%, #ff5722 100%)'
+                  : color === 'success'
+                  ? 'linear-gradient(135deg, #4caf50 0%, #2e7d32 100%)'
+                  : 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)',
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                color: 'transparent',
+                mb: subtitle ? 0.5 : 0
+              }}
+            >
               {value}
             </Typography>
             {subtitle && (
-              <Typography variant="body2" color="textSecondary">
+              <Typography 
+                variant="body2" 
+                color="text.secondary"
+                sx={{ opacity: 0.6, fontSize: '0.8rem' }}
+              >
                 {subtitle}
               </Typography>
             )}
           </Box>
-          <Box color={`${color}.main`}>
-            {icon}
+          <Box 
+            sx={{ 
+              color: color === 'primary' ? '#00e5ff' 
+                : color === 'secondary' ? '#ff6b6b'
+                : color === 'success' ? '#4caf50'
+                : '#2196f3',
+              opacity: 0.8 
+            }}
+          >
+            {React.cloneElement(icon, { sx: { fontSize: '3rem' } })}
           </Box>
         </Box>
       </CardContent>
@@ -164,88 +157,166 @@ const Dashboard = ({ deviceUuid, userStats, onStatsUpdate }) => {
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Workout Dashboard
-      </Typography>
-      
-      {uploadStatus && (
-        <Alert severity={uploadStatus.type} sx={{ mb: 3 }} onClose={() => setUploadStatus(null)}>
-          {uploadStatus.message}
-        </Alert>
-      )}
+      <Box sx={{ mb: 4 }}>
+        <Typography 
+          variant="h3" 
+          sx={{ 
+            fontWeight: 800,
+            background: 'linear-gradient(135deg, #00e5ff 0%, #ff6b6b 100%)',
+            backgroundClip: 'text',
+            WebkitBackgroundClip: 'text',
+            color: 'transparent',
+            mb: 1
+          }}
+        >
+          Welcome to Morse
+        </Typography>
+        
+        <Typography variant="h6" color="text.secondary" sx={{ opacity: 0.8, fontWeight: 400 }}>
+          technology that just wants to get you off your phone
+        </Typography>
+      </Box>
 
       <Grid container spacing={3}>
-        {/* Upload Section */}
+        {/* User Stats Cards */}
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="Claimed Workouts"
+            value={userProfile?.stats?.total_claimed_workouts || 0}
+            icon={<FitnessCenter fontSize="large" />}
+            subtitle={`Member since ${formatDate(user?.created_at)}`}
+            onClick={() => navigate('/workouts')}
+          />
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="Linked Devices"
+            value={userProfile?.stats?.linked_devices || 0}
+            icon={<Devices fontSize="large" />}
+            color="secondary"
+            subtitle="Devices with claimed workouts"
+          />
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="Voice Profiles"
+            value={userProfile?.stats?.voice_profiles_count || 0}
+            icon={<AccountCircle fontSize="large" />}
+            color="success"
+            subtitle="For auto-linking workouts"
+          />
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="Last Activity"
+            value={formatDate(userProfile?.stats?.last_device_activity)}
+            icon={<Assignment fontSize="large" />}
+            color="info"
+            subtitle="Latest device sync"
+          />
+        </Grid>
+
+        {/* Quick Actions */}
         <Grid item xs={12}>
-          <Paper sx={{ p: 3, mb: 3 }}>
+          <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Upload Workout Audio
+              Quick Actions
             </Typography>
-            <Box display="flex" alignItems="center" gap={2}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Get started by searching for your device and claiming workouts, or view your existing claimed workouts.
+            </Typography>
+            <Box display="flex" gap={2} flexWrap="wrap">
               <Button
                 variant="contained"
-                component="label"
-                startIcon={<UploadIcon />}
-                disabled={uploading}
+                startIcon={<Search />}
+                onClick={() => navigate('/search')}
+                size="large"
               >
-                {uploading ? 'Uploading...' : 'Select MP3 File'}
-                <input
-                  type="file"
-                  accept=".mp3,audio/mpeg"
-                  onChange={handleFileUpload}
-                  hidden
-                />
+                Search Devices
               </Button>
-              <Typography variant="body2" color="textSecondary">
-                Upload MP3 recordings of your workout descriptions
-              </Typography>
+              <Button
+                variant="outlined"
+                startIcon={<FitnessCenter />}
+                onClick={() => navigate('/workouts')}
+                size="large"
+                disabled={!userProfile?.stats?.total_claimed_workouts}
+              >
+                View My Workouts
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<Groups />}
+                onClick={() => navigate('/teams')}
+                size="large"
+                color="info"
+              >
+                Teams
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<CloudUpload />}
+                onClick={() => navigate('/upload-test')}
+                size="large"
+                color="secondary"
+              >
+                Upload Test
+              </Button>
             </Box>
           </Paper>
         </Grid>
 
-        {/* Stats Cards */}
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Workouts"
-            value={userStats?.stats?.total_workouts || 0}
-            icon={<FitnessCenter fontSize="large" />}
-            subtitle={`Since ${userStats?.user?.created_at ? formatDate(userStats.user.created_at) : 'N/A'}`}
-          />
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Unique Exercises"
-            value={userStats?.stats?.unique_exercises || 0}
-            icon={<TrendingUp fontSize="large" />}
-            color="secondary"
-          />
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Avg Duration"
-            value={formatDuration(userStats?.stats?.avg_workout_duration)}
-            icon={<Timer fontSize="large" />}
-            color="success"
-          />
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Last Workout"
-            value={userStats?.stats?.last_workout_date ? formatDate(userStats.stats.last_workout_date) : 'None'}
-            icon={<CalendarToday fontSize="large" />}
-            color="info"
-          />
-        </Grid>
+        {/* How It Works */}
+        {(!userProfile?.stats?.total_claimed_workouts || userProfile.stats.total_claimed_workouts === 0) && (
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                How It Works
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={4}>
+                  <Box textAlign="center" sx={{ p: 2 }}>
+                    <Search sx={{ fontSize: 48, color: 'primary.main', mb: 1 }} />
+                    <Typography variant="h6">1. Search</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Enter the last 4 characters of your device UUID to find available workouts
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Box textAlign="center" sx={{ p: 2 }}>
+                    <Assignment sx={{ fontSize: 48, color: 'secondary.main', mb: 1 }} />
+                    <Typography variant="h6">2. Claim</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Claim workouts to create your voice profile for automatic linking
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <Box textAlign="center" sx={{ p: 2 }}>
+                    <AccountCircle sx={{ fontSize: 48, color: 'success.main', mb: 1 }} />
+                    <Typography variant="h6">3. Auto-Link</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Future workouts automatically link to your account using voice recognition
+                    </Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Grid>
+        )}
 
         {/* Processing Queue Status */}
         {queueStats && (
           <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
-                Processing Status
+                System Processing Status
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Real-time status of audio processing and workout extraction.
               </Typography>
               <Box display="flex" gap={2} flexWrap="wrap">
                 <Chip 
@@ -269,110 +340,19 @@ const Dashboard = ({ deviceUuid, userStats, onStatsUpdate }) => {
           </Grid>
         )}
 
-        {/* Recent Workouts */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, height: 400 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">Recent Workouts</Typography>
-              <Button onClick={() => navigate('/workouts')} size="small">
-                View All
-              </Button>
-            </Box>
-            
-            {recentWorkouts.length === 0 ? (
-              <Box display="flex" justifyContent="center" alignItems="center" height="200px">
-                <Typography color="textSecondary">
-                  No workouts yet. Upload an audio file to get started!
-                </Typography>
-              </Box>
-            ) : (
-              <List>
-                {recentWorkouts.map((workout) => (
-                  <ListItem key={workout.id} divider>
-                    <ListItemText
-                      primary={formatDate(workout.workout_date)}
-                      secondary={
-                        <Box>
-                          <Typography variant="body2">
-                            {workout.total_exercises} exercises • {formatDuration(workout.workout_duration_minutes)}
-                          </Typography>
-                          {workout.exercises?.slice(0, 3).map((exercise, idx) => (
-                            <Chip
-                              key={idx}
-                              label={exercise.exercise_name}
-                              size="small"
-                              sx={{ mr: 0.5, mt: 0.5 }}
-                            />
-                          ))}
-                          {workout.exercises?.length > 3 && (
-                            <Chip
-                              label={`+${workout.exercises.length - 3} more`}
-                              size="small"
-                              variant="outlined"
-                              sx={{ mt: 0.5 }}
-                            />
-                          )}
-                        </Box>
-                      }
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            )}
-          </Paper>
-        </Grid>
-
-        {/* Top Exercises */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, height: 400 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">Top Exercises</Typography>
-              <Button onClick={() => navigate('/progress')} size="small">
-                View Progress
-              </Button>
-            </Box>
-            
-            {!userStats?.top_exercises || userStats.top_exercises.length === 0 ? (
-              <Box display="flex" justifyContent="center" alignItems="center" height="200px">
-                <Typography color="textSecondary">
-                  No exercise data yet
-                </Typography>
-              </Box>
-            ) : (
-              <List>
-                {userStats.top_exercises.slice(0, 5).map((exercise, index) => (
-                  <ListItem key={exercise.exercise_name} divider>
-                    <ListItemText
-                      primary={exercise.exercise_name}
-                      secondary={
-                        <Box>
-                          <Typography variant="body2">
-                            {exercise.frequency} times • Avg effort: {typeof exercise.avg_effort === 'number' ? exercise.avg_effort.toFixed(1) : 'N/A'}
-                          </Typography>
-                          {exercise.max_weight && (
-                            <Typography variant="body2" color="primary">
-                              Max weight: {exercise.max_weight} lbs
-                            </Typography>
-                          )}
-                        </Box>
-                      }
-                    />
-                    <Box sx={{ minWidth: 35 }}>
-                      <Typography variant="h6" color="primary">
-                        #{index + 1}
-                      </Typography>
-                    </Box>
-                  </ListItem>
-                ))}
-              </List>
-            )}
-          </Paper>
-        </Grid>
-
-        {/* Workout Charts */}
-        <Grid item xs={12}>
-          <WorkoutCharts deviceUuid={deviceUuid} />
-        </Grid>
+        {/* Recent Activity */}
+        {userProfile?.stats?.last_workout_claimed && (
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Recent Activity
+              </Typography>
+              <Alert severity="info">
+                Last workout claimed: {formatDate(userProfile.stats.last_workout_claimed)}
+              </Alert>
+            </Paper>
+          </Grid>
+        )}
       </Grid>
     </Box>
   );
