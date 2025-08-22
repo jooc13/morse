@@ -1,0 +1,91 @@
+# K3s t2.micro optimized values
+api:
+  replicaCount: 1
+  image:
+    repository: morse/api
+    tag: "session-grouping"
+  service:
+    type: NodePort
+    port: 3000
+    nodePort: 30080
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+worker:
+  replicaCount: 1
+  image:
+    repository: morse/worker
+    tag: "session-grouping"
+  resources:
+    limits:
+      cpu: 300m
+      memory: 512Mi
+    requests:
+      cpu: 150m
+      memory: 256Mi
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: morse/frontend
+    tag: "fixed-tofixed"
+  service:
+    type: NodePort
+    port: 3001
+    nodePort: 30081
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+# Lightweight PostgreSQL
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "morse_admin_pass"
+    username: "morse_user"
+    password: "morse_pass"
+    database: "morse_db"
+  primary:
+    persistence:
+      enabled: true
+      size: 5Gi
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+# Lightweight Redis
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 1Gi
+    resources:
+      limits:
+        cpu: 100m
+        memory: 64Mi
+      requests:
+        cpu: 50m
+        memory: 32Mi
+
+# Disable ingress for now - use NodePort
+ingress:
+  enabled: false
+
+secrets:
+  anthropicApiKey: "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"

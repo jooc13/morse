@@ -12,7 +12,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ src/
 
-RUN useradd -m -u 1000 worker && chown -R worker:worker /app
+RUN useradd -m -u 1000 worker && \
+    mkdir -p /app/pretrained_models && \
+    chmod -R 777 /app/pretrained_models && \
+    chown -R worker:worker /app
 USER worker
 
 CMD ["python", "src/main.py"]

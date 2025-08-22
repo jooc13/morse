@@ -4,13 +4,14 @@ import time
 import json
 import logging
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, List
 from dotenv import load_dotenv
 
 import redis
 from transcriber import WhisperTranscriber
 from llm_processor import WorkoutLLMProcessor
 from database import DatabaseManager
+from speaker_verifier import SpeakerVerifier
 
 load_dotenv()
 
@@ -25,6 +26,7 @@ class WorkoutProcessor:
         self.db = DatabaseManager()
         self.transcriber = WhisperTranscriber()
         self.llm_processor = WorkoutLLMProcessor()
+        self.speaker_verifier = SpeakerVerifier()
         self.redis_client = None
         self.running = False
         
@@ -101,6 +103,9 @@ class WorkoutProcessor:
             
             logger.info(f"Saved workout {workout_id}")
             
+            # Step 4: Extract voice embedding and perform speaker verification
+            await self.process_speaker_verification(audio_file_id, file_path, workout_id)
+            
             # Update status to completed
             await self.db.update_audio_file_status(audio_file_id, 'completed')
             await self.db.mark_audio_file_processed(audio_file_id)
@@ -162,6 +167,18 @@ class WorkoutProcessor:
                 logger.error(f"Error polling for jobs: {e}")
                 await asyncio.sleep(10)
 
+    async def process_pending_sessions(self):
+        """Process complete workout sessions that are ready for LLM analysis"""
+        try:
+            pending_sessions = await self.db.get_pending_sessions()
+            
+            for session_info in pending_sessions:
+                logger.info(f"Processing pending session: {session_info['id']}")
+                await self.process_workout_session(session_info['id'], session_info['device_uuid'])
+                
+        except Exception as e:
+            logger.error(f"Error processing pending sessions: {e}")
+
     async def process_pending_files(self):
         """Process any pending audio files that weren't processed through the queue"""
         try:
@@ -203,14 +220,18 @@ class WorkoutProcessor:
         # Process any pending files first
         await self.process_pending_files()
         
+        # Process any pending sessions
+        await self.process_pending_sessions()
+        
         # Start polling for new jobs
         if self.redis_client:
             logger.info("Starting job polling...")
             await self.poll_for_jobs()
         else:
-            logger.info("No Redis connection - checking for pending files periodically")
+            logger.info("No Redis connection - checking for pending files and sessions periodically")
             while self.running:
                 await self.process_pending_files()
+                await self.process_pending_sessions()
                 await asyncio.sleep(30)  # Check every 30 seconds
 
     async def stop(self):
@@ -218,6 +239,145 @@ class WorkoutProcessor:
         logger.info("Stopping workout processor...")
         self.running = False
         await self.db.close_pool()
+
+    async def process_workout_session(self, session_id: str, device_uuid: str) -> bool:
+        """Process a complete workout session with multiple recordings"""
+        try:
+            logger.info(f"Processing workout session {session_id}")
+            
+            # Update session status to processing
+            await self.db.update_session_status(session_id, 'processing')
+            
+            # Get combined transcription data
+            session_data = await self.db.get_combined_session_transcription(session_id)
+            
+            if not session_data:
+                logger.error(f"No transcription data found for session {session_id}")
+                await self.db.update_session_status(session_id, 'failed', 'No transcription data')
+                return False
+            
+            # Process with LLM
+            logger.info(f"Processing session with {session_data['totalRecordings']} recordings")
+            workout_data = await self.llm_processor.extract_session_workout_data(
+                session_data, device_uuid
+            )
+            
+            if not workout_data['success']:
+                logger.error(f"LLM processing failed for session {session_id}: {workout_data['error']}")
+                await self.db.update_session_status(session_id, 'failed', workout_data['error'])
+                return False
+            
+            # Get user ID from session
+            session_info = await self.db.get_session_info(session_id)
+            if not session_info:
+                logger.error(f"Session {session_id} not found")
+                await self.db.update_session_status(session_id, 'failed', 'Session not found')
+                return False
+            
+            user_id = session_info['user_id']
+            
+            # Save workout data with session reference
+            workout_id = await self.db.save_session_workout_data(
+                user_id,
+                session_id,
+                workout_data['workout']
+            )
+            
+            # Update session status and exercise count
+            total_exercises = len(workout_data['workout'].get('exercises', []))
+            await self.db.update_session_status(
+                session_id, 
+                'completed',
+                f'Processed {total_exercises} exercises from {session_data["totalRecordings"]} recordings'
+            )
+            await self.db.update_session_exercise_count(session_id, total_exercises)
+            
+            logger.info(f"Successfully processed session {session_id} -> workout {workout_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error processing session {session_id}: {str(e)}")
+            try:
+                await self.db.update_session_status(session_id, 'failed', str(e))
+            except:
+                pass
+            return False
+
+    async def process_speaker_verification(self, audio_file_id: str, file_path: str, workout_id: str) -> bool:
+        """Process speaker verification for an audio file"""
+        try:
+            logger.info(f"Starting speaker verification for audio file {audio_file_id}")
+            
+            # Extract voice embedding from audio
+            embedding_result = self.speaker_verifier.extract_voice_embedding(file_path)
+            
+            if not embedding_result['success']:
+                logger.warning(f"Voice embedding extraction failed: {embedding_result['error']}")
+                return False
+            
+            embedding = embedding_result['embedding']
+            quality_score = embedding_result['quality_score']
+            
+            # Save embedding to audio_files table
+            await self.db.save_voice_embedding(audio_file_id, embedding, quality_score)
+            logger.info(f"Saved voice embedding (quality: {quality_score:.3f})")
+            
+            # Get all existing voice profiles for comparison
+            voice_profiles = await self.db.get_all_voice_profiles()
+            
+            if not voice_profiles:
+                logger.info("No existing voice profiles found - workout remains unclaimed")
+                return True
+            
+            # Prepare embeddings for comparison
+            known_embeddings = [profile['embedding_vector'] for profile in voice_profiles]
+            
+            # Perform speaker verification
+            verification_result = self.speaker_verifier.verify_speaker(embedding, known_embeddings)
+            
+            logger.info(f"Speaker verification result: {verification_result}")
+            
+            # Save verification result
+            best_match_profile = None
+            if verification_result['best_match_index'] is not None:
+                best_match_profile = voice_profiles[verification_result['best_match_index']]
+                
+                await self.db.save_speaker_verification_result(
+                    audio_file_id,
+                    best_match_profile['id'],
+                    verification_result['similarity_score'],
+                    verification_result['confidence_level'],
+                    verification_result['match_found']
+                )
+            
+            # Auto-link workout if high confidence match
+            if verification_result['match_found'] and best_match_profile:
+                user_id = best_match_profile['user_id']
+                similarity_score = verification_result['similarity_score']
+                
+                success = await self.db.auto_link_workout_to_user(workout_id, user_id, similarity_score)
+                
+                if success:
+                    logger.info(f"Auto-linked workout {workout_id} to user {user_id} (similarity: {similarity_score:.3f})")
+                else:
+                    logger.warning(f"Failed to auto-link workout {workout_id} - may already be claimed")
+            else:
+                logger.info(f"No high-confidence voice match - workout remains unclaimed")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in speaker verification: {e}")
+            return False
+
+    async def cleanup_expired_workouts_task(self):
+        """Periodic task to clean up expired workouts"""
+        try:
+            expired_count = await self.db.cleanup_expired_workouts()
+            if expired_count > 0:
+                logger.info(f"Cleaned up {expired_count} expired workouts")
+        except Exception as e:
+            logger.error(f"Error cleaning up expired workouts: {e}")
 
 async def main():
     processor = WorkoutProcessor()

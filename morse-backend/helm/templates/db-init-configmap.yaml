@@ -108,3 +108,415 @@ data:
 
     -- Update audio_files table to set processed status for completed transcriptions
     CREATE INDEX idx_audio_files_transcription_status ON audio_files(transcription_status);
+
+  003_workout_sessions.sql: |
+    -- Workout Session Grouping Migration
+    -- This migration enables intelligent grouping of multiple audio recordings into single workout sessions
+
+    -- First, create the new workout_sessions table
+    CREATE TABLE workout_sessions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        session_date DATE NOT NULL,
+        session_start_time TIMESTAMP WITH TIME ZONE,
+        session_end_time TIMESTAMP WITH TIME ZONE,
+        session_duration_minutes INTEGER,
+        total_recordings INTEGER DEFAULT 0,
+        total_exercises INTEGER DEFAULT 0,
+        session_status VARCHAR(50) DEFAULT 'pending', -- pending, processing, completed, failed
+        notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create junction table for audio files to session relationship
+    CREATE TABLE session_audio_files (
+        session_id UUID NOT NULL REFERENCES workout_sessions(id) ON DELETE CASCADE,
+        audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+        recording_order INTEGER NOT NULL,
+        time_offset_minutes DECIMAL(8,2), -- minutes from session start
+        PRIMARY KEY (session_id, audio_file_id)
+    );
+
+    -- Update workouts table to reference sessions instead of individual audio files
+    ALTER TABLE workouts ADD COLUMN session_id UUID REFERENCES workout_sessions(id) ON DELETE CASCADE;
+
+    -- Create indexes for performance
+    CREATE INDEX idx_workout_sessions_user_id ON workout_sessions(user_id);
+    CREATE INDEX idx_workout_sessions_date ON workout_sessions(session_date);
+    CREATE INDEX idx_workout_sessions_status ON workout_sessions(session_status);
+    CREATE INDEX idx_session_audio_files_session_id ON session_audio_files(session_id);
+    CREATE INDEX idx_session_audio_files_audio_file_id ON session_audio_files(audio_file_id);
+    CREATE INDEX idx_workouts_session_id ON workouts(session_id);
+
+    -- Add session tracking to audio_files table
+    ALTER TABLE audio_files ADD COLUMN session_id UUID REFERENCES workout_sessions(id);
+    CREATE INDEX idx_audio_files_session_id ON audio_files(session_id);
+  
+  004_auth_refactor.sql: |
+    -- Authentication Refactor Migration
+    -- Create new users table with passphrase authentication
+    CREATE TABLE app_users (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        passphrase_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        last_login TIMESTAMP WITH TIME ZONE,
+        is_active BOOLEAN DEFAULT true
+    );
+
+    -- Voice profiles for speaker verification
+    CREATE TABLE voice_profiles (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        embedding_vector FLOAT8[] NOT NULL,
+        confidence_score DECIMAL(5,4) NOT NULL,
+        created_from_workout_id UUID,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        is_active BOOLEAN DEFAULT true
+    );
+
+    -- Device ownership tracking
+    CREATE TABLE user_devices (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        device_uuid VARCHAR(255) NOT NULL,
+        first_claimed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        device_name VARCHAR(255),
+        is_active BOOLEAN DEFAULT true,
+        UNIQUE(user_id, device_uuid)
+    );
+
+    -- Workout ownership/claiming system
+    CREATE TABLE workout_claims (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        workout_id UUID NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+        claimed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        claim_method VARCHAR(50) NOT NULL,
+        voice_match_confidence DECIMAL(5,4),
+        UNIQUE(workout_id)
+    );
+
+    -- Session ownership/claiming
+    CREATE TABLE session_claims (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        session_id UUID NOT NULL REFERENCES workout_sessions(id) ON DELETE CASCADE,
+        claimed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        claim_method VARCHAR(50) NOT NULL,
+        voice_match_confidence DECIMAL(5,4),
+        UNIQUE(session_id)
+    );
+
+    -- Speaker verification results
+    CREATE TABLE speaker_verifications (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+        voice_profile_id UUID REFERENCES voice_profiles(id) ON DELETE SET NULL,
+        similarity_score DECIMAL(5,4) NOT NULL,
+        confidence_level VARCHAR(20) NOT NULL,
+        auto_linked BOOLEAN DEFAULT false,
+        verified_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Add status tracking for unclaimed workouts
+    ALTER TABLE workouts ADD COLUMN claim_status VARCHAR(50) DEFAULT 'unclaimed';
+    ALTER TABLE audio_files ADD COLUMN voice_embedding FLOAT8[];
+    ALTER TABLE audio_files ADD COLUMN voice_extracted BOOLEAN DEFAULT false;
+    ALTER TABLE audio_files ADD COLUMN voice_quality_score DECIMAL(5,4);
+
+    -- Indexes for performance
+    CREATE INDEX idx_app_users_passphrase ON app_users(passphrase_hash);
+    CREATE INDEX idx_voice_profiles_user_id ON voice_profiles(user_id);
+    CREATE INDEX idx_voice_profiles_active ON voice_profiles(is_active) WHERE is_active = true;
+    CREATE INDEX idx_user_devices_user_id ON user_devices(user_id);
+    CREATE INDEX idx_user_devices_device_uuid ON user_devices(device_uuid);
+    CREATE INDEX idx_user_devices_active ON user_devices(is_active) WHERE is_active = true;
+    CREATE INDEX idx_workout_claims_user_id ON workout_claims(user_id);
+    CREATE INDEX idx_workout_claims_workout_id ON workout_claims(workout_id);
+    CREATE INDEX idx_session_claims_user_id ON session_claims(user_id);
+    CREATE INDEX idx_session_claims_session_id ON session_claims(session_id);
+    CREATE INDEX idx_speaker_verifications_audio_file_id ON speaker_verifications(audio_file_id);
+    CREATE INDEX idx_speaker_verifications_voice_profile_id ON speaker_verifications(voice_profile_id);
+    CREATE INDEX idx_workouts_claim_status ON workouts(claim_status);
+    CREATE INDEX idx_audio_files_voice_extracted ON audio_files(voice_extracted);
+    CREATE INDEX idx_user_devices_device_uuid_suffix ON user_devices(RIGHT(device_uuid, 4));
+
+    -- Create functions for auth system
+    CREATE OR REPLACE FUNCTION search_devices_by_last4(last4_digits VARCHAR(4))
+    RETURNS TABLE(
+        device_uuid VARCHAR(255),
+        device_name VARCHAR(255),
+        last_seen TIMESTAMP WITH TIME ZONE,
+        unclaimed_workouts_count BIGINT,
+        unclaimed_sessions_count BIGINT
+    ) AS $$
+    BEGIN
+        RETURN QUERY
+        SELECT DISTINCT
+            u.device_uuid,
+            CAST('Device' as VARCHAR(255)) as device_name,
+            u.last_seen,
+            COALESCE(w_count.count, 0) as unclaimed_workouts_count,
+            CAST(0 as BIGINT) as unclaimed_sessions_count
+        FROM users u
+        LEFT JOIN (
+            SELECT 
+                u.device_uuid,
+                COUNT(*) as count
+            FROM users u
+            JOIN workouts w ON u.id = w.user_id
+            WHERE w.claim_status = 'unclaimed'
+            GROUP BY u.device_uuid
+        ) w_count ON u.device_uuid = w_count.device_uuid
+        WHERE RIGHT(u.device_uuid, 4) = last4_digits
+        ORDER BY u.last_seen DESC;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE OR REPLACE FUNCTION get_unclaimed_workouts_for_device(target_device_uuid VARCHAR(255))
+    RETURNS TABLE(
+        workout_id UUID,
+        workout_date DATE,
+        total_exercises INTEGER,
+        duration_minutes INTEGER,
+        audio_filename VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE
+    ) AS $$
+    BEGIN
+        RETURN QUERY
+        SELECT 
+            w.id as workout_id,
+            w.workout_date,
+            w.total_exercises,
+            w.workout_duration_minutes as duration_minutes,
+            af.original_filename as audio_filename,
+            w.created_at
+        FROM workouts w
+        JOIN users u ON w.user_id = u.id
+        JOIN audio_files af ON w.audio_file_id = af.id
+        WHERE u.device_uuid = target_device_uuid
+            AND w.claim_status = 'unclaimed'
+            AND w.created_at > CURRENT_TIMESTAMP - INTERVAL '30 days'
+        ORDER BY w.created_at DESC;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE OR REPLACE FUNCTION claim_workout(
+        p_user_id UUID,
+        p_workout_id UUID,
+        p_claim_method VARCHAR(50) DEFAULT 'manual',
+        p_voice_confidence DECIMAL(5,4) DEFAULT NULL
+    )
+    RETURNS BOOLEAN AS $$
+    DECLARE
+        v_workout_exists BOOLEAN;
+        v_already_claimed BOOLEAN;
+    BEGIN
+        SELECT 
+            (w.id IS NOT NULL) as exists,
+            (w.claim_status != 'unclaimed') as claimed
+        INTO v_workout_exists, v_already_claimed
+        FROM workouts w
+        WHERE w.id = p_workout_id;
+        
+        IF NOT v_workout_exists THEN
+            RAISE EXCEPTION 'Workout not found';
+        END IF;
+        
+        IF v_already_claimed THEN
+            RAISE EXCEPTION 'Workout already claimed';
+        END IF;
+        
+        INSERT INTO workout_claims (user_id, workout_id, claim_method, voice_match_confidence)
+        VALUES (p_user_id, p_workout_id, p_claim_method, p_voice_confidence);
+        
+        UPDATE workouts SET claim_status = 'claimed' WHERE id = p_workout_id;
+        
+        RETURN TRUE;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE VIEW user_workout_summaries AS
+    SELECT 
+        au.id as user_id,
+        COUNT(DISTINCT wc.workout_id) as total_claimed_workouts,
+        COUNT(DISTINCT ud.device_uuid) as linked_devices,
+        COUNT(DISTINCT vp.id) as voice_profiles_count,
+        MAX(wc.claimed_at) as last_workout_claimed,
+        MAX(ud.last_seen) as last_device_activity
+    FROM app_users au
+    LEFT JOIN workout_claims wc ON au.id = wc.user_id
+    LEFT JOIN user_devices ud ON au.id = ud.user_id AND ud.is_active = true
+    LEFT JOIN voice_profiles vp ON au.id = vp.user_id AND vp.is_active = true
+    GROUP BY au.id;
+
+  005_test_data.sql: |
+    -- Test data population script
+    -- This can be easily disabled by setting POPULATE_TEST_DATA=false
+
+    -- Create test users with specific device UUIDs for testing
+    -- These will only be inserted if POPULATE_TEST_DATA is not explicitly set to false
+
+    DO $$
+    BEGIN
+        -- Check if we should populate test data (default: true, unless explicitly disabled)
+        IF current_setting('app.populate_test_data', true) != 'false' THEN
+            
+            -- Insert test users with predictable UUIDs for device search testing
+            INSERT INTO users (device_uuid, created_at) VALUES 
+            ('f47ac10b-58cc-4372-a567-0e02b2c4c4p9', NOW() - INTERVAL '7 days'),   -- Main test UUID ending in c4p9
+            ('a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d', NOW() - INTERVAL '5 days'),   -- Searchable by 4c5d
+            ('9876543f-210a-4bcd-ef12-3456789abc12', NOW() - INTERVAL '3 days'),   -- Searchable by bc12
+            ('deadbeef-cafe-4bad-face-123456789012', NOW() - INTERVAL '2 days'),   -- Searchable by 9012
+            ('12345678-90ab-4cde-f123-456789abcdef', NOW() - INTERVAL '1 day')     -- Searchable by cdef
+            ON CONFLICT (device_uuid) DO NOTHING;
+
+            -- Add some sample audio files for the test devices to make them searchable
+            WITH test_users AS (
+                SELECT id, device_uuid FROM users 
+                WHERE device_uuid IN (
+                    'f47ac10b-58cc-4372-a567-0e02b2c4c4p9',
+                    'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+                    '9876543f-210a-4bcd-ef12-3456789abc12'
+                )
+            )
+            INSERT INTO audio_files (
+                user_id, 
+                original_filename, 
+                file_path, 
+                file_size, 
+                upload_timestamp, 
+                transcription_status,
+                transcription_text
+            )
+            SELECT 
+                tu.id,
+                tu.device_uuid || '_' || extract(epoch from (NOW() - (random() * INTERVAL '24 hours')))::bigint || '.mp3',
+                '/uploads/test_' || tu.device_uuid || '.mp3',
+                1024000 + (random() * 5000000)::int,
+                NOW() - (random() * INTERVAL '24 hours'),
+                'completed',
+                'Test transcription for device ' || tu.device_uuid || '. This is sample workout data for testing purposes.'
+            FROM test_users tu
+            ON CONFLICT DO NOTHING;
+
+            -- Create some test workouts for these devices
+            WITH test_audio_files AS (
+                SELECT af.id as audio_file_id, af.user_id 
+                FROM audio_files af
+                JOIN users u ON af.user_id = u.id
+                WHERE u.device_uuid IN (
+                    'f47ac10b-58cc-4372-a567-0e02b2c4c4p9',
+                    'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+                    '9876543f-210a-4bcd-ef12-3456789abc12'
+                )
+            )
+            INSERT INTO workouts (
+                user_id,
+                audio_file_id,
+                workout_date,
+                workout_start_time,
+                workout_duration_minutes,
+                total_exercises,
+                notes,
+                claim_status
+            )
+            SELECT 
+                taf.user_id,
+                taf.audio_file_id,
+                CURRENT_DATE - (random() * 7)::int,
+                '08:00:00'::time + (random() * INTERVAL '12 hours'),
+                30 + (random() * 60)::int,
+                3 + (random() * 5)::int,
+                'Test workout generated for testing device search and claiming functionality',
+                'unclaimed'
+            FROM test_audio_files taf
+            ON CONFLICT DO NOTHING;
+
+            RAISE NOTICE 'Test data populated successfully. Use device search with last 4 characters: c4p9, 4c5d, bc12, 9012, cdef';
+            
+        ELSE
+            RAISE NOTICE 'Test data population skipped (POPULATE_TEST_DATA=false)';
+        END IF;
+    END $$;
+
+  005_teams.sql: |
+    -- Teams feature migration
+    -- Creates tables for teams, team memberships, and team-specific user display names
+
+    -- Teams table
+    CREATE TABLE teams (
+        team_id SERIAL PRIMARY KEY,
+        team_name VARCHAR(255) NOT NULL,
+        team_description TEXT,
+        creator_user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        invite_code VARCHAR(32) UNIQUE NOT NULL, -- Unique code for joining via link
+        allow_public_view BOOLEAN DEFAULT FALSE, -- Admin control: allow all members to see everyone
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Team memberships table
+    CREATE TABLE team_memberships (
+        membership_id SERIAL PRIMARY KEY,
+        team_id INTEGER NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        display_name VARCHAR(255), -- Optional display name for this team only
+        role VARCHAR(50) DEFAULT 'member', -- 'admin', 'member'
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(team_id, user_id)
+    );
+
+    -- Indexes for performance
+    CREATE INDEX idx_teams_invite_code ON teams(invite_code);
+    CREATE INDEX idx_team_memberships_team_id ON team_memberships(team_id);
+    CREATE INDEX idx_team_memberships_user_id ON team_memberships(user_id);
+
+    -- Function to generate random invite codes
+    CREATE OR REPLACE FUNCTION generate_invite_code() RETURNS VARCHAR(32) AS $$
+    DECLARE
+        code VARCHAR(32);
+        exists_check INTEGER;
+    BEGIN
+        LOOP
+            -- Generate 8-character alphanumeric code (easier for sharing)
+            code := UPPER(SUBSTRING(MD5(RANDOM()::TEXT) FROM 1 FOR 8));
+            
+            -- Check if code already exists
+            SELECT COUNT(*) INTO exists_check FROM teams WHERE invite_code = code;
+            
+            -- If unique, return the code
+            IF exists_check = 0 THEN
+                RETURN code;
+            END IF;
+        END LOOP;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    -- Trigger to auto-generate invite codes
+    CREATE OR REPLACE FUNCTION set_invite_code() RETURNS TRIGGER AS $$
+    BEGIN
+        IF NEW.invite_code IS NULL OR NEW.invite_code = '' THEN
+            NEW.invite_code := generate_invite_code();
+        END IF;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER teams_invite_code_trigger 
+        BEFORE INSERT ON teams 
+        FOR EACH ROW EXECUTE FUNCTION set_invite_code();
+
+    -- Update timestamps trigger
+    CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$
+    BEGIN
+        NEW.updated_at = CURRENT_TIMESTAMP;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER teams_updated_at_trigger 
+        BEFORE UPDATE ON teams 
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

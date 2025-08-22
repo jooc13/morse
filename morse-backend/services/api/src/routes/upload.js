@@ -3,8 +3,10 @@ const multer = require('multer');
 const { Pool } = require('pg');
 const FileService = require('../services/FileService');
 const QueueService = require('../services/QueueService');
+const SessionService = require('../services/SessionService');
 
 const router = express.Router();
+const sessionService = new SessionService();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/morse_db',
@@ -27,7 +29,15 @@ const upload = multer({
   }
 });
 
+// Legacy upload endpoint - can be disabled with DISABLE_LEGACY_UPLOAD=true
 router.post('/', upload.single('audio'), async (req, res) => {
+  // Check if legacy upload is disabled
+  if (process.env.DISABLE_LEGACY_UPLOAD === 'true') {
+    return res.status(410).json({ 
+      error: 'Legacy upload endpoint disabled. Please use the new authentication system.',
+      redirect: '/login'
+    });
+  }
   const client = await pool.connect();
   
   try {
@@ -85,13 +95,29 @@ router.post('/', upload.single('audio'), async (req, res) => {
 
     await client.query('COMMIT');
 
+    // Detect or create workout session for this audio file
+    let sessionDetectionResult;
+    try {
+      sessionDetectionResult = await sessionService.detectSession(
+        userId, 
+        audioFileId, 
+        deviceInfo.timestampDate
+      );
+      console.log(`Session detection result:`, sessionDetectionResult);
+    } catch (sessionError) {
+      console.error('Session detection error:', sessionError);
+      // Continue without session grouping if detection fails
+      sessionDetectionResult = null;
+    }
+
     const queueResult = await QueueService.addTranscriptionJob({
       audioFileId,
       userId,
       filePath,
       originalFilename,
       deviceUuid: deviceInfo.deviceUuid,
-      uploadTimestamp: deviceInfo.timestamp
+      uploadTimestamp: deviceInfo.timestamp,
+      sessionId: sessionDetectionResult?.sessionId || null
     });
 
     if (queueResult.queued) {
@@ -109,7 +135,12 @@ router.post('/', upload.single('audio'), async (req, res) => {
       uploadTimestamp,
       queued: queueResult.queued,
       jobId: queueResult.jobId,
-      deviceUuid: deviceInfo.deviceUuid
+      deviceUuid: deviceInfo.deviceUuid,
+      session: sessionDetectionResult ? {
+        sessionId: sessionDetectionResult.sessionId,
+        isNewSession: sessionDetectionResult.isNewSession,
+        timeGapMinutes: Math.round(sessionDetectionResult.timeGapMinutes || 0)
+      } : null
     });
 
   } catch (error) {
