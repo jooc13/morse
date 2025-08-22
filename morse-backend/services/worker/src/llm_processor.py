@@ -19,13 +19,13 @@ class WorkoutLLMProcessor:
         )
         self.model = "claude-sonnet-4-20250514"
 
-    async def extract_workout_data(self, transcription: str, device_uuid: str) -> Dict[str, Any]:
+    async def extract_workout_data(self, transcription: str, device_uuid: str, is_session: bool = False, recording_count: int = 1) -> Dict[str, Any]:
         """Extract structured workout data from transcription using Claude"""
         try:
             logger.info(f"Processing transcription with LLM for device {device_uuid}")
             
             # Prepare the prompt for Claude
-            prompt = self._build_extraction_prompt(transcription)
+            prompt = self._build_extraction_prompt(transcription, is_session, recording_count)
             
             # Call Claude API
             loop = asyncio.get_event_loop()
@@ -44,7 +44,8 @@ class WorkoutLLMProcessor:
                     'error': 'Failed to parse workout data from LLM response'
                 }
             
-            logger.info(f"Successfully extracted workout data: {len(workout_data.get('exercises', []))} exercises")
+            exercise_count = len(workout_data.get('exercises', []))
+            logger.info(f"Successfully extracted workout data: {exercise_count} exercises from {recording_count} recording(s)")
             
             return {
                 'success': True,
@@ -58,10 +59,23 @@ class WorkoutLLMProcessor:
                 'error': str(e)
             }
 
-    def _build_extraction_prompt(self, transcription: str) -> str:
+    def _build_extraction_prompt(self, transcription: str, is_session: bool = False, recording_count: int = 1) -> str:
         """Build the prompt for Claude to extract workout data"""
-        return f"""You are a fitness expert assistant. Extract structured workout data from the following audio transcription of someone describing their workout.
+        session_context = ""
+        if is_session and recording_count > 1:
+            session_context = f"""
+IMPORTANT: This transcription contains {recording_count} separate audio recordings from a single workout session.
+The recordings are labeled as "Recording 1:", "Recording 2:", etc. These are NOT separate workouts - they are all part of ONE workout session.
 
+Examples of how to interpret multiple recordings:
+- Recording 1: "bench press 185 5 reps" + Recording 2: "bench press 205 5 reps" = One exercise (Bench Press) with 2 sets at different weights
+- Recording 1: "squats 185 8 reps" + Recording 2: "squats 185 8 reps" + Recording 3: "squats 185 6 reps" = One exercise (Squats) with 3 sets
+- Recording 1: "bench press 3 sets 185" + Recording 2: "push-ups 20 reps" = Two different exercises in the same workout
+
+CRITICAL: Combine all recordings into a SINGLE workout with multiple exercises. Do not create separate workouts."""
+
+        return f"""You are a fitness expert assistant. Extract structured workout data from the following audio transcription of someone describing their workout.
+{session_context}
 IMPORTANT: The transcription may contain fragmented or incomplete sentences. Users may say things like:
 - "5 sets 185lbs bench press 4 sets" (where they correct themselves)
 - "bench press 185 5 sets 8 reps"
@@ -83,7 +97,7 @@ The transcription may contain:
 Extract the data and format it as JSON with this exact structure:
 
 {{
-  "workout_date": "YYYY-MM-DD",
+  "workout_date": null,
   "workout_start_time": "HH:MM" or null,
   "workout_duration_minutes": number or null,
   "notes": "string or null",
@@ -112,11 +126,13 @@ Guidelines:
 4. Handle fragmented speech - if someone says "5 sets 185lbs bench press 4 sets", interpret as "bench press, 4 sets, 185lbs"
 5. When numbers appear without clear context, use workout knowledge to assign them (e.g., "bench press 185 5" = 5 reps at 185lbs)
 6. If weight varies per set, include all weights in weight_lbs array
-7. Use today's date if no date is mentioned
+7. Do not extract workout dates - always set workout_date to null
 8. Estimate effort level from descriptive words (easy=3-4, moderate=5-6, hard=7-8, very hard=9-10)
 9. Order exercises as they appear in the transcription
 10. If unclear about data, use null rather than guessing
 11. Look for corrections in speech - if someone mentions different numbers for the same parameter, use the last mentioned value
+12. For multiple recordings: Intelligently combine related exercises (same exercise name) into single exercises with multiple sets
+13. For multiple recordings: Maintain the chronological order of exercises as they appear across all recordings
 
 Transcription:
 "{transcription}"
@@ -177,9 +193,8 @@ Respond with ONLY the JSON object, no additional text or explanation."""
     def _validate_workout_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and clean the extracted workout data"""
         try:
-            # Set defaults
-            if 'workout_date' not in data or not data['workout_date']:
-                data['workout_date'] = date.today().isoformat()
+            # Set defaults - always use today's date for new uploads
+            data['workout_date'] = date.today().isoformat()
             
             if 'exercises' not in data:
                 data['exercises'] = []
@@ -266,6 +281,28 @@ Provide feedback covering:
 5. Specific suggestions for improvement
 
 Keep feedback concise, actionable, and encouraging. Focus on 2-3 key insights."""
+
+    async def extract_session_workout_data(self, session_transcription_data: Dict[str, Any], device_uuid: str) -> Dict[str, Any]:
+        """Extract workout data from a complete session with multiple recordings"""
+        try:
+            combined_text = session_transcription_data['combinedText']
+            recording_count = session_transcription_data['totalRecordings']
+            
+            logger.info(f"Processing session with {recording_count} recordings for device {device_uuid}")
+            
+            return await self.extract_workout_data(
+                combined_text, 
+                device_uuid, 
+                is_session=True, 
+                recording_count=recording_count
+            )
+            
+        except Exception as e:
+            logger.error(f"Session LLM processing error: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
     def health_check(self) -> bool:
         """Check if the LLM processor is working"""

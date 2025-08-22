@@ -8,6 +8,8 @@ require('dotenv').config();
 
 const uploadRoutes = require('./routes/upload');
 const workoutRoutes = require('./routes/workouts');
+const { router: authRoutes } = require('./routes/auth');
+const teamsRoutes = require('./routes/teams');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,6 +37,8 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/upload', uploadLimiter, uploadRoutes);
 app.use('/api/workouts', workoutRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/teams', teamsRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ 
@@ -52,7 +56,17 @@ app.get('/', (req, res) => {
       'GET /health',
       'POST /api/upload',
       'GET /api/workouts/:userId',
-      'GET /api/workouts/:userId/progress'
+      'GET /api/workouts/:userId/progress',
+      'POST /api/auth/register',
+      'POST /api/auth/login',
+      'GET /api/auth/profile',
+      'GET /api/auth/devices/search/:last4',
+      'POST /api/auth/workouts/:workoutId/claim',
+      'POST /api/teams/create',
+      'POST /api/teams/join/:inviteCode',
+      'GET /api/teams/my-teams',
+      'GET /api/teams/:teamId',
+      'GET /api/teams/:teamId/members'
     ]
   });
 });
