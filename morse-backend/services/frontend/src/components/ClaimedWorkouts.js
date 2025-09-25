@@ -175,11 +175,13 @@ function ClaimedWorkouts() {
         sx={{ 
           mb: 2, 
           position: 'relative',
-          borderLeft: isToday ? '4px solid #4caf50' : isThisWeek ? '4px solid #2196f3' : '4px solid transparent',
+          borderLeft: isToday ? '3px solid #4caf50' : isThisWeek ? '3px solid #00e5ff' : '3px solid rgba(255,255,255,0.1)',
+          backgroundColor: 'rgba(255,255,255,0.02)',
+          transition: 'all 0.2s ease-in-out',
           '&:hover': { 
-            boxShadow: 4, 
-            transform: 'translateY(-2px)',
-            transition: 'all 0.2s ease-in-out'
+            boxShadow: '0 4px 20px rgba(0,229,255,0.15)', 
+            transform: 'translateY(-1px)',
+            borderLeftColor: '#00e5ff'
           }
         }}
       >

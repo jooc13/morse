@@ -238,6 +238,8 @@ spec:
           env:
             - name: REACT_APP_API_URL
               value: "http://morse-api:3000"
+            - name: REACT_APP_SHOW_UPLOAD_TEST
+              value: "{{ .Values.env.showUploadTest }}"
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -12,6 +12,8 @@ import UploadTest from './components/UploadTest';
 import Teams from './components/Teams';
 import TeamView from './components/TeamView';
 import TeamJoin from './components/TeamJoin';
+import DeviceLinking from './components/DeviceLinking';
+import WorkoutCalendar from './components/WorkoutCalendar';
 import api from './services/api';
 
 const theme = createTheme({
@@ -339,6 +341,14 @@ function App() {
               <Route 
                 path="/teams/:teamId" 
                 element={<TeamView />} 
+              />
+              <Route 
+                path="/devices" 
+                element={<DeviceLinking onProfileUpdate={refreshProfile} />} 
+              />
+              <Route 
+                path="/calendar" 
+                element={<WorkoutCalendar />} 
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
