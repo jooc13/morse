@@ -5,9 +5,9 @@ replicaCount: 1
 
 image:
   registry: ""
-  repository: morse
-  pullPolicy: Never
-  tag: "latest"
+  repository: cpenny49
+  pullPolicy: Always
+  tag: "amd64"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -17,8 +17,8 @@ fullnameOverride: ""
 api:
   replicaCount: 1
   image:
-    repository: morse/api
-    tag: "latest"
+    repository: cpenny49/morse-api
+    tag: "amd64"
   service:
     type: LoadBalancer
     port: 3000
@@ -32,6 +32,7 @@ api:
   env:
     NODE_ENV: development
     PORT: 3000
+    TEST_DEVICE_UUID: "f47ac10b-58cc-4372-a567-0e02b2c4c4a9"
   autoscaling:
     enabled: false
 
@@ -39,8 +40,8 @@ api:
 worker:
   replicaCount: 1
   image:
-    repository: morse/worker
-    tag: "latest"
+    repository: cpenny49/morse-worker
+    tag: "amd64"
   resources:
     limits:
       cpu: 2000m
@@ -57,11 +58,13 @@ worker:
 frontend:
   replicaCount: 1
   image:
-    repository: morse/frontend
-    tag: "latest"
+    repository: cpenny49/morse-frontend
+    tag: "amd64"
   service:
     type: LoadBalancer
     port: 3001
+  env:
+    REACT_APP_SHOW_UPLOAD_TEST: "true"
   resources:
     limits:
       cpu: 200m
@@ -159,6 +162,8 @@ env:
   anthropicApiKey: ""
   # Test data configuration - controls whether test UUIDs and workouts are created
   populateTestData: true  # Set to false to disable test data population
+  # UI configuration
+  showUploadTest: true  # Set to false to hide upload test button in production
   
 # Secrets
 secrets:

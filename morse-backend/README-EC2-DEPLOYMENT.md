@@ -29,7 +29,7 @@ NodePort (30000-32767) - 0.0.0.0/0
 ### Optional: Elastic IP
 Recommended to assign Elastic IP so instance IP doesn't change on restart.
 
-## Step 2: Install K3s on EC2
+## Step 2: Install K3sl on EC2
 
 SSH into your instance:
 ```bash

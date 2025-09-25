@@ -3,9 +3,6 @@ import {
   Box,
   Typography,
   Paper,
-  List,
-  ListItem,
-  ListItemText,
   Chip,
   Grid,
   Card,
@@ -13,7 +10,6 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Divider,
   Button,
   TextField,
   CircularProgress
@@ -130,11 +126,27 @@ const WorkoutList = ({ deviceUuid }) => {
       details.push(`${exercise.distance_miles} miles`);
     }
     
-    if (exercise.effort_level) {
-      details.push(`Effort: ${exercise.effort_level}/10`);
-    }
-    
     return details.join(' • ');
+  };
+
+  const getWorkoutIntensity = (workout) => {
+    if (!workout.exercises || workout.exercises.length === 0) return 0;
+    const efforts = workout.exercises
+      .map(e => e.effort_level)
+      .filter(e => e !== null && e !== undefined);
+    return efforts.length > 0 ? Math.round(efforts.reduce((a, b) => a + b, 0) / efforts.length) : 0;
+  };
+
+  const getWorkoutVolume = (workout) => {
+    if (!workout.exercises) return 0;
+    return workout.exercises.reduce((total, exercise) => {
+      const sets = exercise.sets || 0;
+      const avgWeight = exercise.weight_lbs ? 
+        exercise.weight_lbs.reduce((sum, w) => sum + (w || 0), 0) / exercise.weight_lbs.length : 0;
+      const avgReps = exercise.reps ? 
+        exercise.reps.reduce((sum, r) => sum + (r || 0), 0) / exercise.reps.length : 0;
+      return total + (sets * avgWeight * avgReps);
+    }, 0);
   };
 
   const getExerciseTypeColor = (type) => {
@@ -219,43 +231,93 @@ const WorkoutList = ({ deviceUuid }) => {
           </Typography>
           
           {workouts.map((workout) => (
-            <Accordion key={workout.id} sx={{ mb: 2 }}>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Accordion key={workout.id} sx={{ 
+              mb: 2,
+              '&:before': { display: 'none' },
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              '&.Mui-expanded': {
+                boxShadow: '0 4px 12px rgba(0,229,255,0.15)',
+                borderColor: 'rgba(0,229,255,0.3)'
+              }
+            }}>
+              <AccordionSummary 
+                expandIcon={<ExpandMoreIcon />}
+                sx={{ 
+                  '& .MuiAccordionSummary-content': { 
+                    margin: '16px 0' 
+                  }
+                }}
+              >
                 <Box sx={{ flexGrow: 1 }}>
                   <Grid container alignItems="center" spacing={2}>
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box display="flex" alignItems="center">
-                        <CalendarToday sx={{ mr: 1, fontSize: 20 }} />
-                        <Typography variant="h6">
-                          {formatDate(workout.workout_date)}
-                        </Typography>
+                    <Grid item xs={12} sm={8} md={6}>
+                      <Box>
+                        <Box display="flex" alignItems="center" mb={0.5}>
+                          <CalendarToday sx={{ mr: 1, fontSize: 18, color: 'primary.main' }} />
+                          <Typography variant="h6" sx={{ mr: 2 }}>
+                            {formatDate(workout.workout_date)}
+                          </Typography>
+                          {workout.workout_start_time && (
+                            <Typography variant="body2" color="text.secondary">
+                              {formatTime(workout.workout_start_time)}
+                            </Typography>
+                          )}
+                        </Box>
+                        <Box display="flex" alignItems="center" gap={2}>
+                          <Box display="flex" alignItems="center">
+                            <FitnessCenter sx={{ mr: 0.5, fontSize: 16, color: 'text.secondary' }} />
+                            <Typography variant="body2" color="text.secondary">
+                              {workout.total_exercises} exercises
+                            </Typography>
+                          </Box>
+                          <Box display="flex" alignItems="center">
+                            <Timer sx={{ mr: 0.5, fontSize: 16, color: 'text.secondary' }} />
+                            <Typography variant="body2" color="text.secondary">
+                              {formatDuration(workout.workout_duration_minutes)}
+                            </Typography>
+                          </Box>
+                        </Box>
                       </Box>
                     </Grid>
                     
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box display="flex" alignItems="center">
-                        <FitnessCenter sx={{ mr: 1, fontSize: 20 }} />
-                        <Typography variant="body1">
-                          {workout.total_exercises} exercises
-                        </Typography>
+                    <Grid item xs={12} sm={4} md={6}>
+                      <Box display="flex" justifyContent="flex-end" alignItems="center" gap={2}>
+                        {getWorkoutIntensity(workout) > 0 && (
+                          <Box display="flex" alignItems="center">
+                            <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                              Intensity
+                            </Typography>
+                            <Box sx={{ 
+                              display: 'flex', 
+                              gap: 0.25,
+                              alignItems: 'center'
+                            }}>
+                              {[...Array(5)].map((_, i) => (
+                                <Box
+                                  key={i}
+                                  sx={{
+                                    width: 6,
+                                    height: 6,
+                                    borderRadius: '50%',
+                                    backgroundColor: i < Math.ceil(getWorkoutIntensity(workout) / 2) 
+                                      ? 'primary.main' 
+                                      : 'rgba(255,255,255,0.2)'
+                                  }}
+                                />
+                              ))}
+                              <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                                {getWorkoutIntensity(workout)}/10
+                              </Typography>
+                            </Box>
+                          </Box>
+                        )}
+                        {getWorkoutVolume(workout) > 0 && (
+                          <Typography variant="caption" color="text.secondary">
+                            {Math.round(getWorkoutVolume(workout)/1000)}k lbs
+                          </Typography>
+                        )}
                       </Box>
-                    </Grid>
-                    
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box display="flex" alignItems="center">
-                        <Timer sx={{ mr: 1, fontSize: 20 }} />
-                        <Typography variant="body1">
-                          {formatDuration(workout.workout_duration_minutes)}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    
-                    <Grid item xs={12} sm={6} md={3}>
-                      {workout.workout_start_time && (
-                        <Typography variant="body2" color="textSecondary">
-                          Started: {formatTime(workout.workout_start_time)}
-                        </Typography>
-                      )}
                     </Grid>
                   </Grid>
                 </Box>
@@ -277,57 +339,111 @@ const WorkoutList = ({ deviceUuid }) => {
                   )}
                   
                   {workout.exercises && workout.exercises.length > 0 ? (
-                    <List>
-                      {workout.exercises.map((exercise, index) => (
-                        <div key={exercise.id}>
-                          <ListItem sx={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-                            <Box sx={{ width: '100%', mb: 1 }}>
-                              <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
-                                <Typography variant="h6">
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600 }}>
+                        Exercise Details
+                      </Typography>
+                      <Grid container spacing={2}>
+                        {workout.exercises.map((exercise) => (
+                          <Grid item xs={12} md={6} key={exercise.id}>
+                            <Paper sx={{ 
+                              p: 2, 
+                              bgcolor: 'rgba(255,255,255,0.02)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              position: 'relative'
+                            }}>
+                              <Box display="flex" alignItems="flex-start" justifyContent="space-between" mb={1}>
+                                <Typography variant="subtitle2" sx={{ fontWeight: 600, flex: 1 }}>
                                   {exercise.exercise_name}
                                 </Typography>
-                                <Box>
+                                <Box display="flex" alignItems="center" gap={1}>
                                   <Chip
                                     label={exercise.exercise_type || 'other'}
                                     color={getExerciseTypeColor(exercise.exercise_type)}
                                     size="small"
-                                    sx={{ mr: 1 }}
+                                    sx={{ fontSize: '0.7rem', height: 20 }}
                                   />
-                                  <Typography variant="body2" component="span" color="textSecondary">
+                                  <Typography variant="caption" color="text.secondary">
                                     #{exercise.order_in_workout}
                                   </Typography>
                                 </Box>
                               </Box>
                               
-                              <Typography variant="body1" sx={{ mb: 1 }}>
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                                 {formatExerciseDetails(exercise)}
                               </Typography>
                               
+                              {exercise.effort_level && (
+                                <Box sx={{ mb: 1 }}>
+                                  <Box display="flex" alignItems="center" justifyContent="space-between" mb={0.5}>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Effort
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                      {exercise.effort_level}/10
+                                    </Typography>
+                                  </Box>
+                                  <Box sx={{ 
+                                    height: 4, 
+                                    backgroundColor: 'rgba(255,255,255,0.1)', 
+                                    borderRadius: 2,
+                                    overflow: 'hidden'
+                                  }}>
+                                    <Box sx={{ 
+                                      height: '100%', 
+                                      width: `${(exercise.effort_level / 10) * 100}%`,
+                                      backgroundColor: 'primary.main',
+                                      transition: 'width 0.3s ease'
+                                    }} />
+                                  </Box>
+                                </Box>
+                              )}
+                              
                               {exercise.muscle_groups && exercise.muscle_groups.length > 0 && (
                                 <Box sx={{ mb: 1 }}>
-                                  {exercise.muscle_groups.map((muscle, idx) => (
-                                    <Chip
-                                      key={idx}
-                                      label={muscle}
-                                      size="small"
-                                      variant="outlined"
-                                      sx={{ mr: 0.5, mb: 0.5 }}
-                                    />
-                                  ))}
+                                  <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                                    Muscle Groups
+                                  </Typography>
+                                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                                    {exercise.muscle_groups.slice(0, 3).map((muscle, idx) => (
+                                      <Chip
+                                        key={idx}
+                                        label={muscle}
+                                        size="small"
+                                        variant="outlined"
+                                        sx={{ 
+                                          fontSize: '0.65rem', 
+                                          height: 18,
+                                          '& .MuiChip-label': { px: 0.5 }
+                                        }}
+                                      />
+                                    ))}
+                                    {exercise.muscle_groups.length > 3 && (
+                                      <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+                                        +{exercise.muscle_groups.length - 3}
+                                      </Typography>
+                                    )}
+                                  </Box>
                                 </Box>
                               )}
                               
                               {exercise.notes && (
-                                <Typography variant="body2" color="textSecondary" sx={{ fontStyle: 'italic' }}>
-                                  Notes: {exercise.notes}
+                                <Typography variant="caption" color="text.secondary" sx={{ 
+                                  fontStyle: 'italic',
+                                  display: 'block',
+                                  mt: 1,
+                                  p: 1,
+                                  backgroundColor: 'rgba(255,255,255,0.05)',
+                                  borderRadius: 1
+                                }}>
+                                  {exercise.notes}
                                 </Typography>
                               )}
-                            </Box>
-                          </ListItem>
-                          {index < workout.exercises.length - 1 && <Divider />}
-                        </div>
-                      ))}
-                    </List>
+                            </Paper>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Box>
                   ) : (
                     <Typography color="textSecondary" sx={{ textAlign: 'center', py: 2 }}>
                       No exercise details available

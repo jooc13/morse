@@ -204,6 +204,27 @@ const apiService = {
     const response = await api.delete(`/teams/${teamId}/leave`);
     return response.data;
   },
+
+  // Device Linking endpoints
+  async getLinkedDevices() {
+    const response = await api.get('/auth/devices/linked');
+    return response.data;
+  },
+
+  async linkDevice(deviceUuid, deviceName = null) {
+    const response = await api.post(`/auth/devices/${deviceUuid}/link`, { deviceName });
+    return response.data;
+  },
+
+  async unlinkDevice(deviceUuid) {
+    const response = await api.delete(`/auth/devices/${deviceUuid}/link`);
+    return response.data;
+  },
+
+  async searchAvailableDevices(last4) {
+    const response = await api.get(`/auth/devices/available/${last4}`);
+    return response.data;
+  },
 };
 
 export default apiService;

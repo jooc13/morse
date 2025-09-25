@@ -10,7 +10,13 @@ import {
   Button,
   Chip,
   LinearProgress,
-  Alert
+  CircularProgress,
+  Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Divider
 } from '@mui/material';
 import {
   FitnessCenter,
@@ -19,7 +25,9 @@ import {
   AccountCircle,
   Devices,
   CloudUpload,
-  Groups
+  Groups,
+  Info,
+  PlayArrow
 } from '@mui/icons-material';
 import api from '../services/api';
 
@@ -27,12 +35,32 @@ const Dashboard = ({ user, userProfile, onProfileUpdate }) => {
   const navigate = useNavigate();
   const [queueStats, setQueueStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState('');
+  const [showWelcomeDialog, setShowWelcomeDialog] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
     const interval = setInterval(loadQueueStats, 10000); // Update queue stats every 10 seconds
     return () => clearInterval(interval);
   }, []);
+
+  // Separate useEffect for welcome dialog - only show once per user
+  useEffect(() => {
+    if (userProfile?.stats && userProfile.stats.total_claimed_workouts === 0) {
+      const hasSeenWelcome = localStorage.getItem(`morse_welcome_seen_${user?.id}`);
+      if (!hasSeenWelcome) {
+        setShowWelcomeDialog(true);
+      }
+    }
+  }, [userProfile, user?.id]);
+
+  const handleCloseWelcomeDialog = () => {
+    setShowWelcomeDialog(false);
+    if (user?.id) {
+      localStorage.setItem(`morse_welcome_seen_${user.id}`, 'true');
+    }
+  };
 
   const loadDashboardData = async () => {
     try {
@@ -62,6 +90,36 @@ const Dashboard = ({ user, userProfile, onProfileUpdate }) => {
       day: 'numeric',
       year: 'numeric'
     });
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('audio/')) {
+      setUploadSuccess('Please select an audio file');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setUploadSuccess('');
+      
+      await api.uploadAudio(file);
+      setUploadSuccess(`File uploaded successfully! Processing started.`);
+      
+      // Refresh dashboard data
+      await loadDashboardData();
+      if (onProfileUpdate) onProfileUpdate();
+      
+    } catch (error) {
+      console.error('Upload failed:', error);
+      setUploadSuccess('Upload failed: ' + (error.response?.data?.error || error.message));
+    } finally {
+      setUploading(false);
+      // Clear the input
+      event.target.value = '';
+    }
   };
 
   const StatCard = ({ title, value, icon, subtitle, color = 'primary', onClick }) => (
@@ -169,11 +227,11 @@ const Dashboard = ({ user, userProfile, onProfileUpdate }) => {
             mb: 1
           }}
         >
-          Welcome to Morse
+        lift morse
         </Typography>
         
         <Typography variant="h6" color="text.secondary" sx={{ opacity: 0.8, fontWeight: 400 }}>
-          technology that just wants to get you off your phone
+          tech that just wants to help you get off your phone
         </Typography>
       </Box>
 
@@ -226,8 +284,13 @@ const Dashboard = ({ user, userProfile, onProfileUpdate }) => {
               Quick Actions
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Get started by searching for your device and claiming workouts, or view your existing claimed workouts.
+              Get started by linking your device and uploading workout audio, or view your existing workouts.
             </Typography>
+            {uploadSuccess && (
+              <Alert severity={uploadSuccess.includes('failed') ? 'error' : 'success'} sx={{ mb: 2 }}>
+                {uploadSuccess}
+              </Alert>
+            )}
             <Box display="flex" gap={2} flexWrap="wrap">
               <Button
                 variant="contained"
@@ -240,11 +303,10 @@ const Dashboard = ({ user, userProfile, onProfileUpdate }) => {
               <Button
                 variant="outlined"
                 startIcon={<FitnessCenter />}
-                onClick={() => navigate('/workouts')}
+                onClick={() => navigate('/calendar')}
                 size="large"
-                disabled={!userProfile?.stats?.total_claimed_workouts}
               >
-                View My Workouts
+                Workout Calendar
               </Button>
               <Button
                 variant="outlined"
@@ -257,12 +319,19 @@ const Dashboard = ({ user, userProfile, onProfileUpdate }) => {
               </Button>
               <Button
                 variant="outlined"
-                startIcon={<CloudUpload />}
-                onClick={() => navigate('/upload-test')}
+                startIcon={uploading ? <CircularProgress size={20} /> : <CloudUpload />}
+                component="label"
                 size="large"
                 color="secondary"
+                disabled={uploading}
               >
-                Upload Test
+                {uploading ? 'Uploading...' : 'Upload Test Audio'}
+                <input
+                  type="file"
+                  accept="audio/*"
+                  hidden
+                  onChange={handleFileUpload}
+                />
               </Button>
             </Box>
           </Paper>
@@ -354,6 +423,76 @@ const Dashboard = ({ user, userProfile, onProfileUpdate }) => {
           </Grid>
         )}
       </Grid>
+
+      {/* Welcome Dialog for New Users */}
+      <Dialog 
+        open={showWelcomeDialog} 
+        onClose={handleCloseWelcomeDialog}
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <Info color="primary" />
+            Welcome to Morse!
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="h6" gutterBottom sx={{ color: 'primary.main' }}>
+            Get started with your workout tracking:
+          </Typography>
+          
+          <Box sx={{ mt: 2, mb: 3 }}>
+            <Typography variant="body1" gutterBottom sx={{ fontWeight: 600 }}>
+              🏋️ Regular Workflow:
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2, pl: 2 }}>
+              1. Search for your workout by device UUID (last 4 characters)<br/>
+              2. Claim your workout to create your voice profile<br/>
+              3. Future workouts from that device will auto-link using voice recognition
+            </Typography>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Typography variant="body1" gutterBottom sx={{ fontWeight: 600 }}>
+              🧪 Testing Workflow:
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
+              1. Upload a test audio file using the button below<br/>
+              2. Search for device "C4A9" to find your test workout<br/>
+              3. Claim it to see the full workflow in action
+            </Typography>
+          </Box>
+
+          <Box display="flex" gap={2} sx={{ mt: 3 }}>
+            <Button
+              variant="contained"
+              startIcon={<Search />}
+              onClick={() => {
+                handleCloseWelcomeDialog();
+                navigate('/search');
+              }}
+            >
+              Search for Workouts
+            </Button>
+            {process.env.REACT_APP_SHOW_UPLOAD_TEST === 'true' && (
+              <Button
+                variant="outlined"
+                startIcon={<CloudUpload />}
+                color="secondary"
+                onClick={handleCloseWelcomeDialog}
+              >
+                I'll Upload a Test File
+              </Button>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseWelcomeDialog}>
+            Got it!
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
