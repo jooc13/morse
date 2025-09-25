@@ -59,6 +59,7 @@ class DatabaseManager:
                     ws.session_date,
                     ws.total_recordings,
                     ws.session_status,
+                    ws.created_at,
                     u.device_uuid
                 FROM workout_sessions ws
                 JOIN users u ON ws.user_id = u.id

@@ -11,7 +11,7 @@ BEGIN
         
         -- Insert test users with predictable UUIDs for device search testing
         INSERT INTO users (device_uuid, created_at) VALUES 
-        ('f47ac10b-58cc-4372-a567-0e02b2c4c4p9', NOW() - INTERVAL '7 days'),   -- Main test UUID ending in c4p9
+        ('f47ac10b-58cc-4372-a567-0e02b2c4c4b9', NOW() - INTERVAL '7 days'),   -- Main test UUID ending in c4b9
         ('a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d', NOW() - INTERVAL '5 days'),   -- Searchable by 4c5d
         ('9876543f-210a-4bcd-ef12-3456789abc12', NOW() - INTERVAL '3 days'),   -- Searchable by c12
         ('deadbeef-cafe-4bad-face-123456789012', NOW() - INTERVAL '2 days'),   -- Searchable by 9012
@@ -22,7 +22,7 @@ BEGIN
         WITH test_users AS (
             SELECT id, device_uuid FROM users 
             WHERE device_uuid IN (
-                'f47ac10b-58cc-4372-a567-0e02b2c4c4p9',
+                'f47ac10b-58cc-4372-a567-0e02b2c4c4b9',
                 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
                 '9876543f-210a-4bcd-ef12-3456789abc12'
             )

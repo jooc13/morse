@@ -165,36 +165,53 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-// Get current user profile
+// Get current user profile with real-time stats calculation
 router.get('/profile', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   
   try {
-    const result = await client.query(`
-      SELECT 
-        au.id,
-        au.created_at,
-        au.last_login,
-        uws.total_claimed_workouts,
-        uws.linked_devices,
-        uws.voice_profiles_count,
-        uws.last_workout_claimed,
-        uws.last_device_activity
-      FROM app_users au
-      LEFT JOIN user_workout_summaries uws ON au.id = uws.user_id
-      WHERE au.id = $1
+    // Get basic user info
+    const userResult = await client.query(`
+      SELECT id, created_at, last_login
+      FROM app_users
+      WHERE id = $1
     `, [req.user.id]);
     
-    const profile = result.rows[0];
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const user = userResult.rows[0];
+    
+    // Calculate real-time stats
+    const statsResult = await client.query(`
+      SELECT
+        -- Total claimed workouts
+        (SELECT COUNT(*) FROM workout_claims WHERE user_id = $1) as total_claimed_workouts,
+        
+        -- Linked devices count
+        (SELECT COUNT(*) FROM user_devices WHERE user_id = $1 AND is_active = true) as linked_devices,
+        
+        -- Voice profiles count
+        (SELECT COUNT(*) FROM voice_profiles WHERE user_id = $1 AND is_active = true) as voice_profiles_count,
+        
+        -- Last workout claimed
+        (SELECT MAX(claimed_at) FROM workout_claims WHERE user_id = $1) as last_workout_claimed,
+        
+        -- Last device activity
+        (SELECT MAX(last_seen) FROM user_devices WHERE user_id = $1) as last_device_activity
+    `, [req.user.id]);
+    
+    const stats = statsResult.rows[0];
     
     res.json({
-      user: profile,
+      user,
       stats: {
-        total_claimed_workouts: profile.total_claimed_workouts || 0,
-        linked_devices: profile.linked_devices || 0,
-        voice_profiles_count: profile.voice_profiles_count || 0,
-        last_workout_claimed: profile.last_workout_claimed,
-        last_device_activity: profile.last_device_activity
+        total_claimed_workouts: parseInt(stats.total_claimed_workouts) || 0,
+        linked_devices: parseInt(stats.linked_devices) || 0,
+        voice_profiles_count: parseInt(stats.voice_profiles_count) || 0,
+        last_workout_claimed: stats.last_workout_claimed,
+        last_device_activity: stats.last_device_activity
       }
     });
     
@@ -279,11 +296,17 @@ router.post('/workouts/:workoutId/claim', authenticateToken, async (req, res) =>
     
     await client.query('BEGIN');
     
-    // First get the audio file path for voice profile creation
+    // First get the audio file info and device info for linking
     const audioResult = await client.query(`
-      SELECT af.file_path, af.voice_embedding, af.voice_quality_score
+      SELECT 
+        af.file_path, 
+        af.voice_embedding, 
+        af.voice_quality_score,
+        u.device_uuid,
+        w.id as workout_id
       FROM workouts w
       JOIN audio_files af ON w.audio_file_id = af.id
+      JOIN users u ON w.user_id = u.id
       WHERE w.id = $1
     `, [workoutId]);
     
@@ -292,22 +315,107 @@ router.post('/workouts/:workoutId/claim', authenticateToken, async (req, res) =>
       return res.status(404).json({ error: 'Workout or audio file not found' });
     }
     
-    const audioFile = audioResult.rows[0];
+    const { voice_embedding, voice_quality_score, device_uuid, workout_id } = audioResult.rows[0];
     
-    // Claim the workout
-    const result = await client.query(
-      'SELECT claim_workout($1, $2, $3) as success',
-      [userId, workoutId, 'manual']
-    );
+    // Try using the claim_workout function, fallback to manual claiming
+    let claimSuccess = false;
+    try {
+      const result = await client.query(
+        'SELECT claim_workout($1, $2, $3) as success',
+        [userId, workoutId, 'manual']
+      );
+      claimSuccess = result.rows[0].success;
+    } catch (funcError) {
+      console.log('Using fallback workout claiming');
+      // Fallback: Manual claim process
+      
+      // Check if already claimed
+      const existingClaim = await client.query(
+        'SELECT id FROM workout_claims WHERE workout_id = $1',
+        [workoutId]
+      );
+      
+      if (existingClaim.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Workout already claimed' });
+      }
+      
+      // Claim the workout
+      await client.query(`
+        INSERT INTO workout_claims (user_id, workout_id, claim_method, voice_match_confidence)
+        VALUES ($1, $2, 'manual', NULL)
+      `, [userId, workoutId]);
+      
+      // Update workout status
+      await client.query(
+        'UPDATE workouts SET claim_status = $1 WHERE id = $2',
+        ['claimed', workoutId]
+      );
+      
+      claimSuccess = true;
+    }
     
-    if (result.rows[0].success) {
-      // Create voice profile if we have voice embedding and good quality
-      if (audioFile.voice_embedding && audioFile.voice_quality_score > 0.6) {
-        await client.query(`
-          INSERT INTO voice_profiles (user_id, embedding_vector, confidence_score, created_from_workout_id)
-          VALUES ($1, $2, $3, $4)
-          ON CONFLICT DO NOTHING
-        `, [userId, audioFile.voice_embedding, audioFile.voice_quality_score, workoutId]);
+    // Additional processing after successful claim
+    console.log(`Workout claim result: success=${claimSuccess}, userId=${userId}`);
+    
+    if (claimSuccess) {
+      console.log(`Starting device linking for device ${device_uuid} to user ${userId}`);
+      
+      // DEVICE LINKING - Simple direct approach
+      try {
+        const deviceLinkResult = await client.query(`
+          INSERT INTO user_devices (user_id, device_uuid, device_name, is_active, last_seen)
+          VALUES ($1, $2, $3, true, CURRENT_TIMESTAMP)
+          ON CONFLICT (user_id, device_uuid) 
+          DO UPDATE SET 
+            last_seen = CURRENT_TIMESTAMP,
+            is_active = true
+          RETURNING id, device_name
+        `, [userId, device_uuid, `Device ${device_uuid.slice(-4).toUpperCase()}`]);
+        
+        console.log('✅ Device linked successfully:', deviceLinkResult.rows[0]);
+      } catch (deviceError) {
+        console.error('❌ Device linking failed:', deviceError.message);
+      }
+      
+      // VOICE PROFILE CREATION
+      try {
+        // First check if user already has a voice profile
+        const existingProfile = await client.query(`
+          SELECT id FROM voice_profiles WHERE user_id = $1 AND is_active = true
+        `, [userId]);
+        
+        let voiceProfileResult;
+        if (existingProfile.rows.length > 0) {
+          // Update existing profile
+          voiceProfileResult = await client.query(`
+            UPDATE voice_profiles 
+            SET embedding_vector = $2, confidence_score = $3, created_from_workout_id = $4
+            WHERE user_id = $1 AND is_active = true
+            RETURNING id
+          `, [
+            userId, 
+            voice_embedding || Array(192).fill(0),
+            voice_quality_score || 0.7,
+            workoutId
+          ]);
+        } else {
+          // Create new profile
+          voiceProfileResult = await client.query(`
+            INSERT INTO voice_profiles (user_id, embedding_vector, confidence_score, created_from_workout_id, is_active)
+            VALUES ($1, $2, $3, $4, true)
+            RETURNING id
+          `, [
+            userId, 
+            voice_embedding || Array(192).fill(0),
+            voice_quality_score || 0.7,
+            workoutId
+          ]);
+        }
+        
+        console.log('✅ Voice profile created/updated:', voiceProfileResult.rows[0]);
+      } catch (voiceError) {
+        console.error('❌ Voice profile creation failed:', voiceError.message);
       }
       
       await client.query('COMMIT');
@@ -317,7 +425,7 @@ router.post('/workouts/:workoutId/claim', authenticateToken, async (req, res) =>
         workout_id: workoutId,
         user_id: userId,
         claimed_at: new Date().toISOString(),
-        voice_profile_created: audioFile.voice_embedding && audioFile.voice_quality_score > 0.6
+        voice_profile_created: voice_embedding && voice_quality_score > 0.6
       });
     } else {
       await client.query('ROLLBACK');
@@ -409,6 +517,210 @@ router.get('/workouts/claimed', authenticateToken, async (req, res) => {
     console.error('Claimed workouts fetch error:', error);
     res.status(500).json({ 
       error: 'Failed to fetch claimed workouts',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Device Linking Endpoints
+
+// Get user's linked devices (fallback for migration compatibility)
+router.get('/devices/linked', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  
+  try {
+    const userId = req.user.id;
+    
+    // Try the new function first, fallback to basic query
+    let result;
+    try {
+      result = await client.query(
+        'SELECT * FROM get_user_linked_devices($1)',
+        [userId]
+      );
+    } catch (funcError) {
+      console.log('Using fallback query for linked devices');
+      // Fallback: Use existing user_devices table if function doesn't exist
+      result = await client.query(`
+        SELECT 
+          device_uuid,
+          device_name,
+          first_claimed_at as linked_at,
+          last_seen as last_activity,
+          0 as recent_workouts_count,
+          0 as pending_workouts_count
+        FROM user_devices 
+        WHERE user_id = $1 AND is_active = true
+        ORDER BY last_seen DESC
+      `, [userId]);
+    }
+    
+    res.json({
+      linked_devices: result.rows
+    });
+    
+  } catch (error) {
+    console.error('Linked devices fetch error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch linked devices',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Link a device to user account (fallback for migration compatibility)
+router.post('/devices/:deviceUuid/link', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  
+  try {
+    const { deviceUuid } = req.params;
+    const { deviceName } = req.body;
+    const userId = req.user.id;
+    
+    // Validate device UUID format
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deviceUuid)) {
+      return res.status(400).json({ error: 'Invalid device UUID format' });
+    }
+    
+    // Check if device exists
+    const deviceCheck = await client.query(
+      'SELECT id FROM users WHERE device_uuid = $1',
+      [deviceUuid]
+    );
+    
+    if (deviceCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Device UUID not found. Device must have uploaded audio files first.' });
+    }
+    
+    // Try using new function, fallback to existing table
+    try {
+      const result = await client.query(
+        'SELECT link_user_to_device($1, $2, $3) as link_id',
+        [userId, deviceUuid, deviceName || null]
+      );
+      
+      if (!result.rows[0].link_id) {
+        return res.status(400).json({ error: 'Failed to link device' });
+      }
+    } catch (funcError) {
+      console.log('Using fallback device linking');
+      // Fallback: Insert into user_devices table
+      await client.query(`
+        INSERT INTO user_devices (user_id, device_uuid, device_name)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id, device_uuid) 
+        DO UPDATE SET 
+          device_name = COALESCE($3, user_devices.device_name),
+          last_seen = CURRENT_TIMESTAMP,
+          is_active = true
+      `, [userId, deviceUuid, deviceName || `Device ${deviceUuid.slice(-4).toUpperCase()}`]);
+    }
+    
+    res.status(201).json({
+      message: 'Device linked successfully',
+      device: { device_uuid: deviceUuid, device_name: deviceName }
+    });
+    
+  } catch (error) {
+    console.error('Device linking error:', error);
+    res.status(500).json({ 
+      error: 'Failed to link device',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Unlink a device from user account
+router.delete('/devices/:deviceUuid/link', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  
+  try {
+    const { deviceUuid } = req.params;
+    const userId = req.user.id;
+    
+    // Try new table first, fallback to existing
+    let result;
+    try {
+      result = await client.query(
+        'UPDATE device_links SET is_active = false WHERE user_id = $1 AND device_uuid = $2 RETURNING id',
+        [userId, deviceUuid]
+      );
+    } catch (error) {
+      result = await client.query(
+        'UPDATE user_devices SET is_active = false WHERE user_id = $1 AND device_uuid = $2 RETURNING id',
+        [userId, deviceUuid]
+      );
+    }
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Device link not found' });
+    }
+    
+    res.json({
+      message: 'Device unlinked successfully'
+    });
+    
+  } catch (error) {
+    console.error('Device unlinking error:', error);
+    res.status(500).json({ 
+      error: 'Failed to unlink device',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Search available devices (not yet linked by this user)
+router.get('/devices/available/:last4', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  
+  try {
+    const { last4 } = req.params;
+    const userId = req.user.id;
+    
+    if (!/^[0-9a-f]{4}$/i.test(last4)) {
+      return res.status(400).json({ error: 'Invalid format. Provide 4 hexadecimal characters.' });
+    }
+    
+    // Find devices that have uploaded audio but are not linked to this user
+    // Check both device_links (new) and user_devices (existing) tables
+    const result = await client.query(`
+      SELECT DISTINCT
+        u.device_uuid,
+        COUNT(DISTINCT w.id) as total_workouts,
+        COUNT(DISTINCT CASE WHEN w.claim_status = 'unclaimed' THEN w.id END) as unclaimed_workouts,
+        MAX(af.upload_timestamp) as last_activity
+      FROM users u
+      JOIN audio_files af ON u.id = af.user_id
+      LEFT JOIN workouts w ON af.id = w.audio_file_id
+      WHERE RIGHT(u.device_uuid, 4) = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM user_devices ud 
+          WHERE ud.device_uuid = u.device_uuid 
+          AND ud.user_id = $2 
+          AND ud.is_active = true
+        )
+        AND af.upload_timestamp > CURRENT_TIMESTAMP - INTERVAL '30 days'
+      GROUP BY u.device_uuid
+      ORDER BY last_activity DESC
+    `, [last4.toLowerCase(), userId]);
+    
+    res.json({
+      search_term: last4,
+      available_devices: result.rows
+    });
+    
+  } catch (error) {
+    console.error('Available devices search error:', error);
+    res.status(500).json({ 
+      error: 'Failed to search available devices',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   } finally {
