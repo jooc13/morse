@@ -24,7 +24,9 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Badge
+  Badge,
+  Switch,
+  FormControlLabel
 } from '@mui/material';
 import { 
   FitnessCenter, 
@@ -45,10 +47,15 @@ import {
   PlayArrow,
   BarChart,
   History,
-  EmojiEvents
+  EmojiEvents,
+  GroupWork,
+  ViewList,
+  LightbulbOutlined
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import WorkoutCard from './WorkoutCard';
+import { groupWorkoutsBySession, generateRecommendations, getWorkoutInsights } from '../utils/workoutGrouping';
 
 function ClaimedWorkouts() {
   const navigate = useNavigate();
@@ -60,6 +67,10 @@ function ClaimedWorkouts() {
   const [selectedWorkout, setSelectedWorkout] = useState(null);
   const [progressInsights, setProgressInsights] = useState(null);
   const [expandedWorkout, setExpandedWorkout] = useState(null);
+  const [groupWorkouts, setGroupWorkouts] = useState(true);
+  const [sessions, setSessions] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
+  const [insights, setInsights] = useState({});
 
   useEffect(() => {
     loadClaimedWorkouts();
@@ -69,8 +80,21 @@ function ClaimedWorkouts() {
   const loadClaimedWorkouts = async () => {
     try {
       setLoading(true);
-      const result = await api.getClaimedWorkouts();
-      setWorkouts(result.workouts || []);
+      const result = await api.getClaimedWorkouts({ limit: 100 });
+      const workoutsData = result.workouts || [];
+      setWorkouts(workoutsData);
+      
+      // Process workouts into sessions
+      const groupedSessions = groupWorkoutsBySession(workoutsData);
+      setSessions(groupedSessions);
+      
+      // Generate recommendations and insights
+      const workoutRecommendations = generateRecommendations(workoutsData, groupedSessions.slice(-5));
+      setRecommendations(workoutRecommendations);
+      
+      const workoutInsights = getWorkoutInsights(groupedSessions);
+      setInsights(workoutInsights);
+      
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load workouts');
     } finally {
@@ -306,17 +330,70 @@ function ClaimedWorkouts() {
   };
 
   const WorkoutsView = () => {
-    const sortedWorkouts = [...workouts].sort((a, b) => new Date(b.workout_date) - new Date(a.workout_date));
+    const displayData = groupWorkouts ? sessions : workouts;
+    const sortedData = [...displayData].sort((a, b) => new Date(b.workout_date) - new Date(a.workout_date));
     
     return (
       <Box>
+        {/* Progressive Overload Recommendations */}
+        {recommendations.length > 0 && (
+          <Card sx={{ mb: 3, backgroundColor: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.3)' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <LightbulbOutlined sx={{ mr: 1, color: '#4caf50' }} />
+                <Typography variant="h6" sx={{ color: '#4caf50' }}>
+                  Progressive Overload Recommendations
+                </Typography>
+              </Box>
+              <Grid container spacing={2}>
+                {recommendations.slice(0, 3).map((rec, index) => (
+                  <Grid item xs={12} md={4} key={index}>
+                    <Card variant="outlined" sx={{ height: '100%' }}>
+                      <CardContent sx={{ p: 2 }}>
+                        <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>
+                          {rec.exercise_name || 'General'}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {rec.reason}
+                        </Typography>
+                        {rec.type === 'weight_progression' && (
+                          <Box sx={{ mt: 1 }}>
+                            <Chip 
+                              label={`${rec.current_weight}lbs → ${rec.recommended_weight}lbs`} 
+                              size="small" 
+                              color="success" 
+                            />
+                          </Box>
+                        )}
+                        {rec.type === 'volume_progression' && (
+                          <Box sx={{ mt: 1 }}>
+                            <Chip 
+                              label={`${rec.current_sets} → ${rec.recommended_sets} sets`} 
+                              size="small" 
+                              color="primary" 
+                            />
+                          </Box>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Quick Stats */}
         <Grid container spacing={2} sx={{ mb: 3 }}>
           <Grid item xs={6} md={3}>
             <Card variant="outlined">
               <CardContent sx={{ p: 2, textAlign: 'center' }}>
-                <Typography variant="h4" color="primary">{workouts.length}</Typography>
-                <Typography variant="body2" color="text.secondary">Total Workouts</Typography>
+                <Typography variant="h4" color="primary">
+                  {groupWorkouts ? sessions.length : workouts.length}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {groupWorkouts ? 'Workout Sessions' : 'Total Workouts'}
+                </Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -324,7 +401,7 @@ function ClaimedWorkouts() {
             <Card variant="outlined">
               <CardContent sx={{ p: 2, textAlign: 'center' }}>
                 <Typography variant="h4" color="secondary">
-                  {workouts.reduce((sum, w) => sum + (w.total_exercises || 0), 0)}
+                  {insights.total_exercises || 0}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">Total Exercises</Typography>
               </CardContent>
@@ -334,9 +411,9 @@ function ClaimedWorkouts() {
             <Card variant="outlined">
               <CardContent sx={{ p: 2, textAlign: 'center' }}>
                 <Typography variant="h4" color="info.main">
-                  {Math.round(workouts.reduce((sum, w) => sum + getWorkoutVolume(w), 0) / 1000)}k
+                  {insights.workouts_per_week || 0}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">Total Volume</Typography>
+                <Typography variant="body2" color="text.secondary">Workouts/Week</Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -344,16 +421,39 @@ function ClaimedWorkouts() {
             <Card variant="outlined">
               <CardContent sx={{ p: 2, textAlign: 'center' }}>
                 <Typography variant="h4" sx={{ color: '#ffd700' }}>
-                  {workouts.reduce((sum, w) => sum + getWorkoutPRs(w).length, 0)}
+                  {Math.round(insights.consistency_score || 0)}%
                 </Typography>
-                <Typography variant="body2" color="text.secondary">Personal Records</Typography>
+                <Typography variant="body2" color="text.secondary">Consistency</Typography>
               </CardContent>
             </Card>
           </Grid>
         </Grid>
 
+        {/* View Toggle */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <History color="primary" />
+            {groupWorkouts ? 'Workout Sessions' : 'Individual Workouts'}
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={groupWorkouts}
+                onChange={(e) => setGroupWorkouts(e.target.checked)}
+                color="primary"
+              />
+            }
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                {groupWorkouts ? <GroupWork /> : <ViewList />}
+                {groupWorkouts ? 'Group by Session' : 'Show All'}
+              </Box>
+            }
+          />
+        </Box>
+
         {/* Workout List */}
-        {sortedWorkouts.length === 0 ? (
+        {sortedData.length === 0 ? (
           <Paper elevation={1} sx={{ p: 4, textAlign: 'center' }}>
             <FitnessCenter sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
             <Typography variant="h5" gutterBottom>
@@ -365,16 +465,12 @@ function ClaimedWorkouts() {
           </Paper>
         ) : (
           <Box>
-            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <History color="primary" />
-              Recent Workouts
-            </Typography>
-            {sortedWorkouts.map((workout) => (
+            {sortedData.map((item) => (
               <WorkoutCard 
-                key={workout.workout_id} 
-                workout={workout}
+                key={item.session_id || item.workout_id} 
+                workout={item}
                 onClick={() => setExpandedWorkout(
-                  expandedWorkout === workout.workout_id ? null : workout.workout_id
+                  expandedWorkout === (item.session_id || item.workout_id) ? null : (item.session_id || item.workout_id)
                 )}
               />
             ))}
@@ -612,7 +708,7 @@ function ClaimedWorkouts() {
       {/* View Mode Tabs */}
       <Tabs 
         value={viewMode} 
-        onChange={(e, newValue) => setViewMode(newValue)} 
+        onChange={(_, newValue) => setViewMode(newValue)} 
         sx={{ mb: 3 }}
       >
         <Tab 
