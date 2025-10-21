@@ -327,10 +327,6 @@ function App() {
                 element={<WorkoutClaiming onProfileUpdate={refreshProfile} />} 
               />
               <Route 
-                path="/workouts" 
-                element={<ClaimedWorkouts />} 
-              />
-              <Route 
                 path="/upload-test" 
                 element={<UploadTest />} 
               />
@@ -345,10 +341,6 @@ function App() {
               <Route 
                 path="/devices" 
                 element={<DeviceLinking onProfileUpdate={refreshProfile} />} 
-              />
-              <Route 
-                path="/calendar" 
-                element={<WorkoutCalendar />} 
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
