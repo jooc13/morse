@@ -3,7 +3,7 @@ import {
   Paper,
   Typography,
   Box,
-  CircularProgress,
+  LinearProgress,
   Alert,
   FormControl,
   InputLabel,
@@ -12,8 +12,12 @@ import {
   Fade,
   Chip
 } from '@mui/material';
-import { Psychology, Insights, TrendingUp } from '@mui/icons-material';
+import { Psychology, Insights, TrendingUp, AutoAwesome } from '@mui/icons-material';
+import { motion } from 'framer-motion';
 import api from '../services/api';
+
+const MotionPaper = motion(Paper);
+const MotionChip = motion(Chip);
 
 const LLMSummary = ({ deviceUuid }) => {
   const [summary, setSummary] = useState(null);
@@ -68,40 +72,108 @@ const LLMSummary = ({ deviceUuid }) => {
   };
 
   return (
-    <Paper sx={{ p: 3, mt: 3 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h5" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Psychology color="primary" />
-          AI Workout Insights
-        </Typography>
-        
-        <FormControl size="small" sx={{ minWidth: 140 }}>
+    <MotionPaper
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      sx={{
+        p: 3,
+        mt: 3,
+        border: '1px solid',
+        borderColor: 'divider',
+        borderRadius: 2,
+        background: 'linear-gradient(135deg, #fafafa 0%, #ffffff 100%)'
+      }}
+    >
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
+        <Box display="flex" alignItems="center" gap={1.5}>
+          <Box
+            sx={{
+              width: 40,
+              height: 40,
+              borderRadius: 2,
+              backgroundColor: 'grey.900',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <AutoAwesome sx={{ fontSize: 20, color: 'white' }} />
+          </Box>
+          <Typography
+            variant="h6"
+            sx={{
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              color: 'text.primary'
+            }}
+          >
+            AI Workout Insights
+          </Typography>
+        </Box>
+
+        <FormControl
+          size="small"
+          sx={{
+            minWidth: 140,
+            '& .MuiOutlinedInput-root': {
+              borderRadius: 2
+            }
+          }}
+        >
           <InputLabel>Time Period</InputLabel>
           <Select
             value={days}
             label="Time Period"
             onChange={(e) => setDays(e.target.value)}
+            sx={{
+              fontWeight: 500,
+              '& .MuiOutlinedInput-notchedOutline': {
+                borderWidth: '1.5px'
+              }
+            }}
           >
             <MenuItem value={30}>30 Days</MenuItem>
             <MenuItem value={90}>90 Days</MenuItem>
             <MenuItem value={180}>6 Months</MenuItem>
             <MenuItem value={365}>1 Year</MenuItem>
-            <MenuItem value={1095}>All Time (3 years)</MenuItem>
+            <MenuItem value={1095}>All Time</MenuItem>
           </Select>
         </FormControl>
       </Box>
 
       {loading && (
-        <Box display="flex" justifyContent="center" alignItems="center" py={4}>
-          <CircularProgress />
-          <Typography variant="body2" sx={{ ml: 2 }}>
-            Analyzing your workout patterns...
-          </Typography>
+        <Box py={4}>
+          <Box display="flex" alignItems="center" justifyContent="center" gap={2} mb={2}>
+            <Psychology sx={{ fontSize: 24, color: 'text.secondary' }} />
+            <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+              Analyzing your workout patterns...
+            </Typography>
+          </Box>
+          <LinearProgress
+            sx={{
+              height: 2,
+              backgroundColor: 'grey.100',
+              '& .MuiLinearProgress-bar': {
+                backgroundColor: 'grey.900'
+              }
+            }}
+          />
         </Box>
       )}
 
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert
+          severity="error"
+          sx={{
+            mb: 2,
+            border: '1px solid',
+            borderColor: 'grey.300',
+            backgroundColor: 'grey.50',
+            color: 'text.primary',
+            borderRadius: 2
+          }}
+        >
           {error}
         </Alert>
       )}
@@ -112,51 +184,128 @@ const LLMSummary = ({ deviceUuid }) => {
             {/* Data Points Summary */}
             {summary.data_points && (
               <Box sx={{ mb: 3 }}>
-                <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
-                  <Chip 
-                    icon={<TrendingUp />} 
-                    label={`${summary.data_points.total_workouts} Workouts`} 
-                    color="primary" 
-                    variant="outlined" 
+                <Box display="flex" gap={1.5} flexWrap="wrap" mb={2}>
+                  <MotionChip
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.2, delay: 0.1 }}
+                    icon={<TrendingUp sx={{ fontSize: 16 }} />}
+                    label={`${summary.data_points.total_workouts} Workouts`}
+                    sx={{
+                      backgroundColor: 'grey.900',
+                      color: 'white',
+                      fontWeight: 600,
+                      height: 32,
+                      borderRadius: 2,
+                      '& .MuiChip-icon': {
+                        color: 'white'
+                      }
+                    }}
                   />
-                  <Chip 
-                    icon={<Insights />} 
-                    label={`${summary.data_points.unique_exercises} Exercises`} 
-                    color="secondary" 
-                    variant="outlined" 
+                  <MotionChip
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.2, delay: 0.15 }}
+                    icon={<Insights sx={{ fontSize: 16 }} />}
+                    label={`${summary.data_points.unique_exercises} Exercises`}
+                    sx={{
+                      backgroundColor: 'grey.100',
+                      color: 'text.primary',
+                      fontWeight: 600,
+                      height: 32,
+                      borderRadius: 2,
+                      border: '1.5px solid',
+                      borderColor: 'grey.300'
+                    }}
                   />
-                  <Chip 
-                    label={`${summary.data_points.avg_duration} min avg`} 
-                    color="success" 
-                    variant="outlined" 
+                  <MotionChip
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.2, delay: 0.2 }}
+                    label={`${summary.data_points.avg_duration} min avg`}
+                    sx={{
+                      backgroundColor: 'grey.100',
+                      color: 'text.primary',
+                      fontWeight: 600,
+                      height: 32,
+                      borderRadius: 2,
+                      border: '1.5px solid',
+                      borderColor: 'grey.300'
+                    }}
                   />
-                  <Chip 
-                    label={`${summary.data_points.muscle_groups_targeted} muscle groups`} 
-                    color="info" 
-                    variant="outlined" 
+                  <MotionChip
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.2, delay: 0.25 }}
+                    label={`${summary.data_points.muscle_groups_targeted} muscle groups`}
+                    sx={{
+                      backgroundColor: 'grey.100',
+                      color: 'text.primary',
+                      fontWeight: 600,
+                      height: 32,
+                      borderRadius: 2,
+                      border: '1.5px solid',
+                      borderColor: 'grey.300'
+                    }}
                   />
                 </Box>
               </Box>
             )}
 
             {/* AI Summary */}
-            <Paper sx={{ p: 2, bgcolor: 'grey.50', border: '1px solid', borderColor: 'grey.200' }}>
-              <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 2, fontStyle: 'italic' }}>
-                AI Analysis for the last {days} days:
-              </Typography>
-              
-              <Box sx={{ '& > *': { mb: 2 } }}>
-                {formatSummaryText(summary.summary)}
-              </Box>
-            </Paper>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: 0.3 }}
+            >
+              <Paper
+                sx={{
+                  p: 3,
+                  bgcolor: 'grey.50',
+                  border: '1px solid',
+                  borderColor: 'grey.200',
+                  borderRadius: 2
+                }}
+              >
+                <Typography
+                  variant="overline"
+                  sx={{
+                    color: 'text.secondary',
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                    letterSpacing: '0.1em',
+                    mb: 2,
+                    display: 'block'
+                  }}
+                >
+                  AI Analysis • Last {days} Days
+                </Typography>
 
-            <Typography variant="caption" color="textSecondary" sx={{ mt: 2, display: 'block', textAlign: 'center' }}>
-              🤖 Generated by Claude AI • Refresh the page to get new insights
+                <Box sx={{ '& > *': { mb: 2 } }}>
+                  {formatSummaryText(summary.summary)}
+                </Box>
+              </Paper>
+            </motion.div>
+
+            <Typography
+              variant="caption"
+              sx={{
+                mt: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
+                color: 'text.secondary',
+                fontSize: '0.75rem'
+              }}
+            >
+              <AutoAwesome sx={{ fontSize: 14 }} />
+              Generated by Claude AI
             </Typography>
           </Box>
         </Fade>
       )}
-    </Paper>
+    </MotionPaper>
   );
 };
 
