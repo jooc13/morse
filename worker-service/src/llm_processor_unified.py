@@ -60,7 +60,7 @@ class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str):
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-pro')
+        self.model = genai.GenerativeModel('gemini-1.0-pro')
 
     async def generate_response(self, prompt: str) -> str:
         loop = asyncio.get_event_loop()

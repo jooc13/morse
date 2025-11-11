@@ -519,7 +519,7 @@ const WorkoutList = ({ deviceUuid }) => {
                   )}
                 </Box>
               </AccordionDetails>
-            </Accordion>
+            </MotionAccordion>
           ))}
           
           {pagination.hasMore && (
