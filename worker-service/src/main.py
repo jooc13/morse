@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 import redis
 from transcriber import WhisperTranscriber
-from llm_processor import WorkoutLLMProcessor
+from llm_processor_unified import WorkoutLLMProcessor
 from database import DatabaseManager
 
 load_dotenv()

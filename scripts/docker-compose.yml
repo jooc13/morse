@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: morse_pass
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/migrations:/docker-entrypoint-initdb.d
+      - ../database/migrations:/docker-entrypoint-initdb.d
     ports:
       - "5433:5432"
     healthcheck:
@@ -36,7 +36,7 @@ services:
   # API Service
   api:
     build:
-      context: ./services/api
+      context: ../api-service
       dockerfile: Dockerfile
     environment:
       NODE_ENV: development
@@ -47,7 +47,7 @@ services:
       UPLOAD_DIR: /app/uploads
     volumes:
       - api_uploads:/app/uploads
-      - ./services/api/src:/app/src
+      - ../api-service/src:/app/src
     ports:
       - "3000:3000"
     depends_on:
@@ -60,17 +60,19 @@ services:
   # Worker Service
   worker:
     build:
-      context: ./services/worker
+      context: ../worker-service
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgresql://morse_user:morse_pass@db:5432/morse_db
       REDIS_HOST: redis
       REDIS_PORT: 6379
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
       WHISPER_MODEL: base
     volumes:
       - api_uploads:/app/uploads:ro
-      - ./services/worker/src:/app/src
+      - ../worker-service/src:/app/src
     depends_on:
       db:
         condition: service_healthy
@@ -83,12 +85,12 @@ services:
   # Frontend
   frontend:
     build:
-      context: ./services/frontend
+      context: ../frontend
       dockerfile: Dockerfile
     environment:
-      REACT_APP_API_URL: http://localhost:3000/api
+      REACT_APP_API_URL: http://api:3000
     ports:
-      - "8080:80"
+      - "8080:3001"
     depends_on:
       - api
     restart: unless-stopped
