@@ -21,6 +21,8 @@
     "@mui/material": "^5.12.3",
     "@mui/icons-material": "^5.12.3",
     "@mui/lab": "^5.0.0-alpha.130",
+    "framer-motion": "^10.16.4",
+    "react-loading-skeleton": "^3.3.1",
     "web-vitals": "^2.1.4"
   },
   "scripts": {

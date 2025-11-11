@@ -16,15 +16,20 @@ import {
   Divider,
   Button,
   TextField,
-  CircularProgress
+  LinearProgress
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
   FitnessCenter,
   Timer,
-  CalendarToday
+  CalendarToday,
+  List as ListIcon
 } from '@mui/icons-material';
+import { motion, AnimatePresence } from 'framer-motion';
 import api from '../services/api';
+
+const MotionPaper = motion(Paper);
+const MotionAccordion = motion(Accordion);
 
 const WorkoutList = ({ deviceUuid }) => {
   const [workouts, setWorkouts] = useState([]);
@@ -148,24 +153,72 @@ const WorkoutList = ({ deviceUuid }) => {
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
+      <Box>
+        <LinearProgress
+          sx={{
+            height: 2,
+            backgroundColor: 'grey.100',
+            '& .MuiLinearProgress-bar': {
+              backgroundColor: 'text.primary'
+            }
+          }}
+        />
       </Box>
     );
   }
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Workout History
-      </Typography>
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
+        <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <ListIcon sx={{ fontSize: 28, color: 'text.primary' }} />
+          <Box>
+            <Typography
+              variant="h3"
+              sx={{
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                color: 'text.primary'
+              }}
+            >
+              Workout History
+            </Typography>
+            <Typography variant="body1" sx={{ color: 'text.secondary', mt: 0.5 }}>
+              Detailed view of all your recorded workouts
+            </Typography>
+          </Box>
+        </Box>
+      </motion.div>
 
       {/* Filters */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
+      <MotionPaper
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.1 }}
+        sx={{
+          p: 3,
+          mb: 3,
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 2
+        }}
+      >
+        <Typography
+          variant="overline"
+          sx={{
+            color: 'text.secondary',
+            fontSize: '0.7rem',
+            fontWeight: 600,
+            letterSpacing: '0.1em'
+          }}
+        >
           Filters
         </Typography>
-        <Grid container spacing={2}>
+        <Grid container spacing={2} sx={{ mt: 1 }}>
           <Grid item xs={12} sm={6} md={3}>
             <TextField
               label="Start Date"
@@ -174,6 +227,13 @@ const WorkoutList = ({ deviceUuid }) => {
               onChange={(e) => handleDateFilter('startDate', e.target.value)}
               InputLabelProps={{ shrink: true }}
               fullWidth
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  '&:hover fieldset': {
+                    borderColor: 'text.secondary',
+                  },
+                },
+              }}
             />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
@@ -184,42 +244,101 @@ const WorkoutList = ({ deviceUuid }) => {
               onChange={(e) => handleDateFilter('endDate', e.target.value)}
               InputLabelProps={{ shrink: true }}
               fullWidth
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  '&:hover fieldset': {
+                    borderColor: 'text.secondary',
+                  },
+                },
+              }}
             />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Button 
-              variant="outlined" 
-              onClick={() => setFilters({ startDate: '', endDate: '' })}
-              fullWidth
-            >
-              Clear Filters
-            </Button>
+            <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}>
+              <Button
+                variant="outlined"
+                onClick={() => setFilters({ startDate: '', endDate: '' })}
+                fullWidth
+                sx={{
+                  borderWidth: '1.5px',
+                  color: 'text.primary',
+                  borderColor: 'divider',
+                  '&:hover': {
+                    borderWidth: '1.5px',
+                    borderColor: 'text.primary',
+                    backgroundColor: 'rgba(0, 0, 0, 0.02)'
+                  }
+                }}
+              >
+                Clear Filters
+              </Button>
+            </motion.div>
           </Grid>
         </Grid>
-      </Paper>
+      </MotionPaper>
 
       {/* Workout List */}
       {workouts.length === 0 ? (
-        <Paper sx={{ p: 6, textAlign: 'center' }}>
-          <FitnessCenter sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" color="textSecondary" gutterBottom>
+        <MotionPaper
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3, delay: 0.2 }}
+          sx={{
+            p: 6,
+            textAlign: 'center',
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 2
+          }}
+        >
+          <FitnessCenter sx={{ fontSize: 64, color: 'grey.300', mb: 2 }} />
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 1, color: 'text.primary' }}>
             No workouts found
           </Typography>
-          <Typography variant="body2" color="textSecondary">
-            {filters.startDate || filters.endDate 
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            {filters.startDate || filters.endDate
               ? 'Try adjusting your date filters or upload some workout audio files.'
               : 'Upload some workout audio files to see them here!'
             }
           </Typography>
-        </Paper>
+        </MotionPaper>
       ) : (
         <Box>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+          <Typography
+            variant="caption"
+            sx={{
+              mb: 3,
+              display: 'block',
+              color: 'text.secondary',
+              fontSize: '0.8rem',
+              fontWeight: 500
+            }}
+          >
             Showing {workouts.length} of {pagination.total} workouts
           </Typography>
-          
-          {workouts.map((workout) => (
-            <Accordion key={workout.id} sx={{ mb: 2 }}>
+
+          {workouts.map((workout, index) => (
+            <MotionAccordion
+              key={workout.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, delay: index * 0.05 }}
+              sx={{
+                mb: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: '12px !important',
+                '&:before': { display: 'none' },
+                '&.Mui-expanded': {
+                  margin: '0 0 16px 0'
+                },
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                '&:hover': {
+                  borderColor: 'text.secondary',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)'
+                }
+              }}
+            >
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Box sx={{ flexGrow: 1 }}>
                   <Grid container alignItems="center" spacing={2}>
@@ -264,12 +383,36 @@ const WorkoutList = ({ deviceUuid }) => {
               <AccordionDetails>
                 <Box>
                   {workout.transcription && (
-                    <Card sx={{ mb: 2, bgcolor: 'grey.50' }}>
+                    <Card
+                      sx={{
+                        mb: 2,
+                        bgcolor: 'grey.50',
+                        border: '1px solid',
+                        borderColor: 'grey.200',
+                        borderRadius: 2
+                      }}
+                    >
                       <CardContent>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Original Audio Transcription:
+                        <Typography
+                          variant="overline"
+                          sx={{
+                            color: 'text.secondary',
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            letterSpacing: '0.1em'
+                          }}
+                        >
+                          Original Audio Transcription
                         </Typography>
-                        <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontStyle: 'italic',
+                            color: 'text.primary',
+                            mt: 1,
+                            lineHeight: 1.6
+                          }}
+                        >
                           "{workout.transcription}"
                         </Typography>
                       </CardContent>
@@ -311,7 +454,15 @@ const WorkoutList = ({ deviceUuid }) => {
                                       label={muscle}
                                       size="small"
                                       variant="outlined"
-                                      sx={{ mr: 0.5, mb: 0.5 }}
+                                      sx={{
+                                        mr: 0.5,
+                                        mb: 0.5,
+                                        borderColor: 'grey.300',
+                                        color: 'text.secondary',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 500,
+                                        borderRadius: 1.5
+                                      }}
                                     />
                                   ))}
                                 </Box>
@@ -335,12 +486,32 @@ const WorkoutList = ({ deviceUuid }) => {
                   )}
                   
                   {workout.notes && (
-                    <Card sx={{ mt: 2, bgcolor: 'info.light', color: 'info.contrastText' }}>
+                    <Card
+                      sx={{
+                        mt: 2,
+                        bgcolor: 'grey.900',
+                        color: 'white',
+                        border: '1px solid',
+                        borderColor: 'grey.800',
+                        borderRadius: 2
+                      }}
+                    >
                       <CardContent>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Workout Notes:
+                        <Typography
+                          variant="overline"
+                          sx={{
+                            color: 'grey.300',
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            letterSpacing: '0.1em'
+                          }}
+                        >
+                          Workout Notes
                         </Typography>
-                        <Typography variant="body2">
+                        <Typography
+                          variant="body2"
+                          sx={{ color: 'white', mt: 1, lineHeight: 1.6 }}
+                        >
                           {workout.notes}
                         </Typography>
                       </CardContent>
@@ -353,13 +524,44 @@ const WorkoutList = ({ deviceUuid }) => {
           
           {pagination.hasMore && (
             <Box textAlign="center" mt={3}>
-              <Button
-                variant="outlined"
-                onClick={() => loadWorkouts(false)}
-                disabled={loadingMore}
-              >
-                {loadingMore ? <CircularProgress size={24} /> : 'Load More Workouts'}
-              </Button>
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Button
+                  variant="outlined"
+                  onClick={() => loadWorkouts(false)}
+                  disabled={loadingMore}
+                  sx={{
+                    px: 4,
+                    py: 1.5,
+                    borderWidth: '1.5px',
+                    borderColor: 'text.primary',
+                    color: 'text.primary',
+                    fontWeight: 600,
+                    '&:hover': {
+                      borderWidth: '1.5px',
+                      backgroundColor: 'text.primary',
+                      color: 'background.paper'
+                    },
+                    '&.Mui-disabled': {
+                      borderColor: 'grey.300',
+                      color: 'grey.400'
+                    }
+                  }}
+                >
+                  {loadingMore ? (
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <LinearProgress
+                        sx={{
+                          width: 100,
+                          height: 2,
+                          backgroundColor: 'grey.200'
+                        }}
+                      />
+                    </Box>
+                  ) : (
+                    'Load More Workouts'
+                  )}
+                </Button>
+              </motion.div>
             </Box>
           )}
         </Box>
