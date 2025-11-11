@@ -18,9 +18,9 @@ class FileService {
   }
 
   parseFilename(filename) {
-    const match = filename.match(/^([^_]+)_(\d+)\.mp3$/);
+    const match = filename.match(/^([^_]+)_(\d+)\.(mp3|m4a)$/i);
     if (!match) {
-      throw new Error('Invalid filename format. Expected: deviceId_timestamp.mp3');
+      throw new Error('Invalid filename format. Expected: deviceId_timestamp.mp3 or deviceId_timestamp.m4a');
     }
 
     const [, deviceUuid, timestamp] = match;
@@ -71,9 +71,9 @@ class FileService {
   }
 
   validateFileType(file) {
-    const allowedTypes = ['audio/mpeg', 'audio/mp3'];
-    const allowedExtensions = ['.mp3'];
-    
+    const allowedTypes = ['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a', 'audio/x-m4a'];
+    const allowedExtensions = ['.mp3', '.m4a'];
+
     const hasValidMimeType = allowedTypes.includes(file.mimetype);
     const hasValidExtension = allowedExtensions.includes(
       path.extname(file.originalname).toLowerCase()

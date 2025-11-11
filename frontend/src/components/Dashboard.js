@@ -70,14 +70,16 @@ const Dashboard = ({ deviceUuid, userStats, onStatsUpdate }) => {
     if (!file) return;
 
     // Validate file type
-    if (!file.name.endsWith('.mp3')) {
-      setUploadStatus({ type: 'error', message: 'Please select an MP3 file' });
+    const validExtensions = ['.mp3', '.m4a'];
+    const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    if (!validExtensions.includes(fileExtension)) {
+      setUploadStatus({ type: 'error', message: 'Please select an MP3 or M4A file' });
       return;
     }
 
-    // Generate a test filename with current timestamp
+    // Generate a test filename with current timestamp, preserving original extension
     const timestamp = Date.now();
-    const testFilename = `${deviceUuid}_${timestamp}.mp3`;
+    const testFilename = `${deviceUuid}_${timestamp}${fileExtension}`;
     
     // Create a new file with the correct name
     const renamedFile = new File([file], testFilename, { type: file.type });
@@ -188,10 +190,10 @@ const Dashboard = ({ deviceUuid, userStats, onStatsUpdate }) => {
                 startIcon={<UploadIcon />}
                 disabled={uploading}
               >
-                {uploading ? 'Uploading...' : 'Select MP3 File'}
+                {uploading ? 'Uploading...' : 'Select Audio File'}
                 <input
                   type="file"
-                  accept=".mp3,audio/mpeg"
+                  accept=".mp3,.m4a,audio/mpeg,audio/mp4,audio/m4a"
                   onChange={handleFileUpload}
                   hidden
                 />

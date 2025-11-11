@@ -22,7 +22,7 @@ const upload = multer({
     if (FileService.validateFileType(file)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only MP3 files are allowed.'), false);
+      cb(new Error('Invalid file type. Only MP3 and M4A files are allowed.'), false);
     }
   }
 });
