@@ -185,13 +185,16 @@ class DatabaseManager:
         # Save weight progress
         weights = exercise.get('weight_lbs', [])
         if weights and isinstance(weights, list):
-            max_weight = max(weights)
-            await conn.execute(
-                """INSERT INTO user_progress 
-                   (user_id, exercise_name, metric_type, metric_value, recorded_date, workout_id) 
-                   VALUES ($1, $2, 'weight', $3, $4, $5)""",
-                user_id, exercise_name, max_weight, workout_date, workout_id
-            )
+            # Filter out null/None values and find max
+            valid_weights = [w for w in weights if w is not None and w != 0]
+            if valid_weights:
+                max_weight = max(valid_weights)
+                await conn.execute(
+                    """INSERT INTO user_progress
+                       (user_id, exercise_name, metric_type, metric_value, recorded_date, workout_id)
+                       VALUES ($1, $2, 'weight', $3, $4, $5)""",
+                    user_id, exercise_name, max_weight, workout_date, workout_id
+                )
         
         # Save reps progress
         reps = exercise.get('reps', [])

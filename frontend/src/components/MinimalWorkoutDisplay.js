@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, Typography, Paper, Grid, Chip } from '@mui/material';
 import { FitnessCenter, CalendarToday } from '@mui/icons-material';
 import api from '../services/api';
+import UploadProgress from './UploadProgress';
 
 const MinimalWorkoutDisplay = ({ deviceUuid }) => {
   const [workouts, setWorkouts] = useState([]);
@@ -41,14 +42,18 @@ const MinimalWorkoutDisplay = ({ deviceUuid }) => {
 
   if (workouts.length === 0) {
     return (
-      <Box sx={{ p: 2, textAlign: 'center' }}>
-        <Typography color="text.secondary">No workouts found</Typography>
+      <Box sx={{ p: 2, maxWidth: 600, mx: 'auto' }}>
+        <UploadProgress deviceUuid={deviceUuid} />
+        <Box sx={{ textAlign: 'center', mt: 4 }}>
+          <Typography color="text.secondary">No workouts found</Typography>
+        </Box>
       </Box>
     );
   }
 
   return (
     <Box sx={{ p: 2, maxWidth: 600, mx: 'auto' }}>
+      <UploadProgress deviceUuid={deviceUuid} />
       {workouts.map((workout, workoutIndex) => (
         <Paper
           key={workoutIndex}
