@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, Grid, Chip } from '@mui/material';
-import { FitnessCenter, CalendarToday } from '@mui/icons-material';
+import { Box, Typography, Paper, Grid, Chip, Button, Input } from '@mui/material';
+import { FitnessCenter, CalendarToday, CloudUpload } from '@mui/icons-material';
 import api from '../services/api';
 import UploadProgress from './UploadProgress';
 
 const MinimalWorkoutDisplay = ({ deviceUuid }) => {
   const [workouts, setWorkouts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     loadWorkouts();
@@ -21,6 +22,23 @@ const MinimalWorkoutDisplay = ({ deviceUuid }) => {
       console.error('Failed to load workouts:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      await api.uploadAudio(file);
+      // Refresh workouts after upload
+      setTimeout(() => loadWorkouts(), 2000);
+    } catch (error) {
+      console.error('Upload failed:', error);
+      alert('Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -43,6 +61,54 @@ const MinimalWorkoutDisplay = ({ deviceUuid }) => {
   if (workouts.length === 0) {
     return (
       <Box sx={{ p: 2, maxWidth: 600, mx: 'auto' }}>
+        {/* Upload Section */}
+        <Paper
+          elevation={0}
+          sx={{
+            p: 3,
+            mb: 3,
+            border: '2px dashed',
+            borderColor: 'grey.300',
+            backgroundColor: '#fafafa',
+            textAlign: 'center',
+            '&:hover': {
+              borderColor: 'primary.main',
+              backgroundColor: '#f5f5f5'
+            }
+          }}
+        >
+          <input
+            type="file"
+            accept=".m4a,.mp3"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+            id="audio-upload-empty"
+          />
+          <label htmlFor="audio-upload-empty">
+            <Button
+              component="span"
+              variant="outlined"
+              disabled={uploading}
+              startIcon={<CloudUpload />}
+              sx={{
+                px: 3,
+                py: 1.5,
+                textTransform: 'none',
+                fontSize: '1rem',
+                borderWidth: '2px',
+                '&:hover': {
+                  borderWidth: '2px'
+                }
+              }}
+            >
+              {uploading ? 'Uploading...' : 'Upload Your First Workout'}
+            </Button>
+          </label>
+          <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+            Record your workout and upload the audio file
+          </Typography>
+        </Paper>
+
         <UploadProgress deviceUuid={deviceUuid} />
         <Box sx={{ textAlign: 'center', mt: 4 }}>
           <Typography color="text.secondary">No workouts found</Typography>
@@ -53,6 +119,54 @@ const MinimalWorkoutDisplay = ({ deviceUuid }) => {
 
   return (
     <Box sx={{ p: 2, maxWidth: 600, mx: 'auto' }}>
+      {/* Upload Section */}
+      <Paper
+        elevation={0}
+        sx={{
+          p: 3,
+          mb: 3,
+          border: '2px dashed',
+          borderColor: 'grey.300',
+          backgroundColor: '#fafafa',
+          textAlign: 'center',
+          '&:hover': {
+            borderColor: 'primary.main',
+            backgroundColor: '#f5f5f5'
+          }
+        }}
+      >
+        <input
+          type="file"
+          accept=".m4a,.mp3"
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+          id="audio-upload"
+        />
+        <label htmlFor="audio-upload">
+          <Button
+            component="span"
+            variant="outlined"
+            disabled={uploading}
+            startIcon={<CloudUpload />}
+            sx={{
+              px: 3,
+              py: 1.5,
+              textTransform: 'none',
+              fontSize: '1rem',
+              borderWidth: '2px',
+              '&:hover': {
+                borderWidth: '2px'
+              }
+            }}
+          >
+            {uploading ? 'Uploading...' : 'Upload Workout Audio'}
+          </Button>
+        </label>
+        <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+          M4A or MP3 files only
+        </Typography>
+      </Paper>
+
       <UploadProgress deviceUuid={deviceUuid} />
       {workouts.map((workout, workoutIndex) => (
         <Paper
