@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { FitnessCenter, Dashboard as DashboardIcon, Timeline, List } from '@mui/icons-material';
 import Dashboard from './components/Dashboard';
 import WorkoutList from './components/WorkoutList';
+import MinimalWorkoutDisplay from './components/MinimalWorkoutDisplay';
 import ProgressChart from './components/ProgressChart';
 import api from './services/api';
 import theme from './theme';
@@ -195,10 +196,8 @@ function App() {
                 <Route
                   path="/"
                   element={
-                    <Dashboard
+                    <MinimalWorkoutDisplay
                       deviceUuid={deviceUuid}
-                      userStats={userStats}
-                      onStatsUpdate={() => loadUserStats(deviceUuid)}
                     />
                   }
                 />
