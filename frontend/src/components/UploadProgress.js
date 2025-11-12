@@ -5,13 +5,22 @@ import {
   LinearProgress,
   Paper,
   Collapse,
-  IconButton
+  IconButton,
+  Chip,
+  Stepper,
+  Step,
+  StepLabel,
+  StepContent,
+  Divider
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
   CheckCircle,
   Error as ErrorIcon,
-  HourglassEmpty
+  HourglassEmpty,
+  PlayArrow,
+  Pause,
+  AudioFile
 } from '@mui/icons-material';
 import api from '../services/api';
 
@@ -24,19 +33,41 @@ const UploadProgress = ({ deviceUuid }) => {
   });
   const [expanded, setExpanded] = useState(false);
   const [recentFiles, setRecentFiles] = useState([]);
+  const [activeFiles, setActiveFiles] = useState([]);
+  const [detailedProgress, setDetailedProgress] = useState({});
 
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const response = await api.getQueueStats();
+        const [queueStatsResponse, activeFilesResponse] = await Promise.all([
+          api.getQueueStats(),
+          api.getActiveProcessingFiles()
+        ]);
+
         const newStats = {
-          total: response.waiting + response.active + response.completed + response.failed,
-          completed: response.completed,
-          processing: response.active,
-          failed: response.failed,
-          waiting: response.waiting
+          total: queueStatsResponse.waiting + queueStatsResponse.active + queueStatsResponse.completed + queueStatsResponse.failed,
+          completed: queueStatsResponse.completed,
+          processing: queueStatsResponse.active,
+          failed: queueStatsResponse.failed,
+          waiting: queueStatsResponse.waiting
         };
         setStats(newStats);
+        setActiveFiles(activeFilesResponse);
+
+        // Get detailed progress for each active file
+        const progressPromises = activeFilesResponse.map(async (file) => {
+          try {
+            const progress = await api.getFileProgress(file.audioFileId);
+            return { [file.audioFileId]: progress };
+          } catch (error) {
+            console.error(`Failed to get progress for file ${file.audioFileId}:`, error);
+            return { [file.audioFileId]: null };
+          }
+        });
+
+        const progressResults = await Promise.all(progressPromises);
+        const newDetailedProgress = progressResults.reduce((acc, result) => ({ ...acc, ...result }), {});
+        setDetailedProgress(newDetailedProgress);
 
         // If we have recent activity, show expanded
         if (newStats.processing > 0 || newStats.waiting > 0) {
@@ -62,8 +93,135 @@ const UploadProgress = ({ deviceUuid }) => {
     return 'primary';
   };
 
+  const renderFileProgress = (file) => {
+    const progress = detailedProgress[file.audioFileId];
+    if (!progress) {
+      return (
+        <Box key={file.audioFileId} sx={{ mb: 2, p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            <AudioFile sx={{ fontSize: 16 }} />
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+              {file.filename}
+            </Typography>
+            <Chip size="small" label="Loading..." />
+          </Box>
+          <LinearProgress />
+        </Box>
+      );
+    }
+
+    const stages = [
+      { key: 'transcription', label: 'Audio Transcription', icon: AudioFile },
+      { key: 'llm_processing', label: 'AI Analysis', icon: PlayArrow },
+      { key: 'data_saving', label: 'Saving Data', icon: CheckCircle }
+    ];
+
+    const currentStageIndex = stages.findIndex(stage => stage.key === progress.currentStage);
+
+    return (
+      <Box key={file.audioFileId} sx={{ mb: 3, p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
+        {/* File header */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+          <AudioFile sx={{ fontSize: 16 }} />
+          <Typography variant="body2" sx={{ fontWeight: 500, flex: 1 }}>
+            {progress.filename}
+          </Typography>
+          <Chip
+            size="small"
+            label={`${progress.overallProgress}%`}
+            color={progress.status === 'failed' ? 'error' : progress.status === 'completed' ? 'success' : 'primary'}
+          />
+        </Box>
+
+        {/* Overall progress bar */}
+        <LinearProgress
+          variant="determinate"
+          value={progress.overallProgress}
+          color={progress.status === 'failed' ? 'error' : progress.status === 'completed' ? 'success' : 'primary'}
+          sx={{ mb: 2, height: 6, borderRadius: 3 }}
+        />
+
+        {/* Stage stepper */}
+        <Stepper activeStep={currentStageIndex} orientation="vertical" sx={{ ml: 1 }}>
+          {stages.map((stage, index) => {
+            const stageData = progress.stages?.find(s => s.name === stage.key);
+            const StageIcon = stage.icon;
+
+            let stepIcon;
+            let stepColor = 'grey';
+
+            if (stageData) {
+              if (stageData.status === 'completed') {
+                stepIcon = <CheckCircle sx={{ color: 'success.main' }} />;
+                stepColor = 'success';
+              } else if (stageData.status === 'failed') {
+                stepIcon = <ErrorIcon sx={{ color: 'error.main' }} />;
+                stepColor = 'error';
+              } else if (stageData.status === 'in_progress') {
+                stepIcon = <HourglassEmpty sx={{ color: 'primary.main' }} />;
+                stepColor = 'primary';
+              } else {
+                stepIcon = <StageIcon sx={{ color: 'grey.500' }} />;
+              }
+            } else {
+              stepIcon = <StageIcon sx={{ color: 'grey.500' }} />;
+            }
+
+            return (
+              <Step key={stage.key} active={index <= currentStageIndex}>
+                <StepLabel
+                  icon={stepIcon}
+                  sx={{
+                    '& .MuiStepLabel-label': {
+                      fontSize: '0.875rem',
+                      color: `${stepColor}.main`
+                    }
+                  }}
+                >
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                      {stage.label}
+                    </Typography>
+                    {stageData && stageData.message && (
+                      <Typography variant="caption" color="text.secondary">
+                        {stageData.message}
+                      </Typography>
+                    )}
+                    {stageData && stageData.progress > 0 && (
+                      <Box sx={{ mt: 0.5, width: '100%' }}>
+                        <LinearProgress
+                          variant="determinate"
+                          value={stageData.progress}
+                          size="small"
+                          color={stepColor}
+                          sx={{ height: 3, borderRadius: 2 }}
+                        />
+                      </Box>
+                    )}
+                  </Box>
+                </StepLabel>
+                <StepContent>
+                  {/* Additional content can go here */}
+                </StepContent>
+              </Step>
+            );
+          })}
+        </Stepper>
+
+        {/* Current message */}
+        {progress.currentMessage && (
+          <Box sx={{ mt: 1, p: 1, backgroundColor: 'grey.50', borderRadius: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {progress.currentMessage}
+            </Typography>
+          </Box>
+        )}
+      </Box>
+    );
+  };
+
   // Only show if there's activity or recent files
-  if (stats.total === 0 && recentFiles.length === 0) {
+  if (stats.total === 0 && recentFiles.length === 0 && activeFiles.length === 0) {
     return null;
   }
 
@@ -155,10 +313,29 @@ const UploadProgress = ({ deviceUuid }) => {
             borderColor: 'divider'
           }}
         >
-          <Typography variant="caption" color="text.secondary">
-            {stats.waiting > 0 && `${stats.waiting} files waiting in queue...`}
-            {stats.total === 0 && 'No files uploaded yet. Record your workout audio to get started!'}
-          </Typography>
+          {/* Detailed progress for active files */}
+          {activeFiles.length > 0 ? (
+            <>
+              <Typography variant="body2" sx={{ fontWeight: 500, mb: 2 }}>
+                Processing Details:
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              {activeFiles.map(file => renderFileProgress(file))}
+            </>
+          ) : (
+            <>
+              {stats.waiting > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  {stats.waiting} files waiting in queue...
+                </Typography>
+              )}
+              {stats.total === 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  No files uploaded yet. Record your workout audio to get started!
+                </Typography>
+              )}
+            </>
+          )}
         </Box>
       </Collapse>
     </Paper>

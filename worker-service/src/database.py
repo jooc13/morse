@@ -270,7 +270,7 @@ class DatabaseManager:
         try:
             if not self.connection_pool:
                 await self.initialize_pool()
-            
+
             conn = await self.get_connection()
             try:
                 await conn.fetchval("SELECT 1")
@@ -280,3 +280,66 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
             return False
+
+    async def init_processing_stages(self, audio_file_id: str):
+        """Initialize processing stages for a file"""
+        conn = await self.get_connection()
+        try:
+            stages = ['transcription', 'llm_processing', 'data_saving']
+            for stage in stages:
+                await conn.execute(
+                    """INSERT INTO file_processing_progress
+                       (audio_file_id, stage, status)
+                       VALUES ($1, $2, 'pending')
+                       ON CONFLICT (audio_file_id, stage) DO NOTHING""",
+                    audio_file_id, stage
+                )
+            logger.info(f"Initialized processing stages for file {audio_file_id}")
+        finally:
+            await self.connection_pool.release(conn)
+
+    async def update_stage_progress(self, audio_file_id: str, stage: str, progress: int,
+                                   status: str = 'in_progress', message: str = None):
+        """Update progress for a specific processing stage"""
+        conn = await self.get_connection()
+        try:
+            # Update the stage progress
+            await conn.execute(
+                """UPDATE file_processing_progress
+                   SET progress_percent = $3, status = $4, message = $5,
+                       started_at = CASE WHEN started_at IS NULL AND $4 = 'in_progress' THEN NOW() ELSE started_at END,
+                       completed_at = CASE WHEN $4 = 'completed' THEN NOW() ELSE NULL END
+                   WHERE audio_file_id = $1 AND stage = $2""",
+                audio_file_id, stage, progress, status, message
+            )
+
+            # Update overall file progress and stage
+            overall_progress = await self._calculate_overall_progress(conn, audio_file_id)
+            await conn.execute(
+                """UPDATE audio_files
+                   SET processing_progress = $2, processing_stage = $3, processing_message = $4
+                   WHERE id = $1""",
+                audio_file_id, overall_progress, stage, message
+            )
+
+            logger.info(f"Updated {stage} progress for file {audio_file_id}: {progress}% ({status})")
+        finally:
+            await self.connection_pool.release(conn)
+
+    async def _calculate_overall_progress(self, conn, audio_file_id: str) -> int:
+        """Calculate overall progress based on all stages"""
+        result = await conn.fetchrow(
+            """SELECT AVG(progress_percent) as avg_progress
+               FROM file_processing_progress
+               WHERE audio_file_id = $1""",
+            audio_file_id
+        )
+        return int(result['avg_progress'] or 0)
+
+    async def complete_stage(self, audio_file_id: str, stage: str, message: str = None):
+        """Mark a processing stage as completed"""
+        await self.update_stage_progress(audio_file_id, stage, 100, 'completed', message)
+
+    async def fail_stage(self, audio_file_id: str, stage: str, error_message: str):
+        """Mark a processing stage as failed"""
+        await self.update_stage_progress(audio_file_id, stage, 0, 'failed', error_message)
