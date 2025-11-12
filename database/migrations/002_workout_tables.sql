@@ -1,7 +1,7 @@
 -- Workout and exercise data tables
 
--- Transcriptions table
-CREATE TABLE transcriptions (
+-- Transcriptions table (with IF NOT EXISTS for idempotency)
+CREATE TABLE IF NOT EXISTS transcriptions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
     raw_text TEXT NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE transcriptions (
 );
 
 -- Workouts table
-CREATE TABLE workouts (
+CREATE TABLE IF NOT EXISTS workouts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
@@ -25,7 +25,7 @@ CREATE TABLE workouts (
 );
 
 -- Exercises table
-CREATE TABLE exercises (
+CREATE TABLE IF NOT EXISTS exercises (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     workout_id UUID NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
     exercise_name VARCHAR(255) NOT NULL,
@@ -44,7 +44,7 @@ CREATE TABLE exercises (
 );
 
 -- Exercise templates/library for consistency
-CREATE TABLE exercise_library (
+CREATE TABLE IF NOT EXISTS exercise_library (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) UNIQUE NOT NULL,
     category VARCHAR(100),
@@ -57,7 +57,7 @@ CREATE TABLE exercise_library (
 );
 
 -- User progress tracking
-CREATE TABLE user_progress (
+CREATE TABLE IF NOT EXISTS user_progress (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     exercise_name VARCHAR(255) NOT NULL,
