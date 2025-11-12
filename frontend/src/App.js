@@ -17,8 +17,8 @@ function App() {
     const testUuid = localStorage.getItem('morse_device_uuid') || 'test-device-' + Math.random().toString(36).substr(2, 9);
     localStorage.setItem('morse_device_uuid', testUuid);
     setDeviceUuid(testUuid);
-    
-    // Load user stats
+
+    // Load user stats - handle gracefully if user doesn't exist yet
     loadUserStats(testUuid);
   }, []);
 
@@ -28,7 +28,11 @@ function App() {
       const stats = await api.getUserStats(uuid);
       setUserStats(stats);
     } catch (error) {
-      console.error('Failed to load user stats:', error);
+      // If user doesn't exist (404), that's okay - they just haven't uploaded anything yet
+      if (error.response?.status !== 404) {
+        console.error('Failed to load user stats:', error);
+      }
+      setUserStats(null);
     } finally {
       setLoading(false);
     }

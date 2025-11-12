@@ -19,7 +19,11 @@ const MinimalWorkoutDisplay = ({ deviceUuid }) => {
       const response = await api.getWorkouts(deviceUuid, { limit: 100 });
       setWorkouts(response.workouts || []);
     } catch (error) {
-      console.error('Failed to load workouts:', error);
+      // If user doesn't exist (404), that's okay - they just haven't uploaded anything yet
+      if (error.response?.status !== 404) {
+        console.error('Failed to load workouts:', error);
+      }
+      setWorkouts([]);
     } finally {
       setLoading(false);
     }
@@ -49,6 +53,15 @@ const MinimalWorkoutDisplay = ({ deviceUuid }) => {
       console.log('Starting upload for file:', file.name, 'Size:', file.size, 'Type:', file.type);
       const result = await api.uploadAudio(file);
       console.log('Upload successful:', result);
+
+      // Update the device UUID if it's different from the current one
+      if (result.deviceUuid && result.deviceUuid !== deviceUuid) {
+        console.log('Updating device UUID from', deviceUuid, 'to', result.deviceUuid);
+        localStorage.setItem('morse_device_uuid', result.deviceUuid);
+        // Notify parent component to update its state
+        window.location.reload(); // Simple approach to refresh with new UUID
+      }
+
       alert(`Upload successful! Audio file queued for processing.`);
       // Refresh workouts after upload
       setTimeout(() => loadWorkouts(), 2000);
