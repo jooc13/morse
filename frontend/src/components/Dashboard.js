@@ -514,73 +514,80 @@ const Dashboard = ({ deviceUuid, userStats, onStatsUpdate }) => {
               </Box>
             ) : (
               <List sx={{ flex: 1, overflow: 'auto' }}>
-                {recentWorkouts.map((workout, index) => (
-                  <motion.div
-                    key={workout.id}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.2, delay: index * 0.05 }}
-                  >
-                    <ListItem
-                      sx={{
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        borderRadius: 2,
-                        mb: 1.5,
-                        transition: 'all 0.2s',
-                        '&:hover': {
-                          borderColor: 'text.secondary',
-                          backgroundColor: 'rgba(0, 0, 0, 0.01)'
-                        }
-                      }}
+                {recentWorkouts.map((workout, index) => {
+                  // Extract unique exercise names from sets
+                  const exerciseNames = workout.sets
+                    ? [...new Set(workout.sets.map(set => set.exercise_name))]
+                    : [];
+
+                  return (
+                    <motion.div
+                      key={`${workout.workout_date}-${index}`}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.2, delay: index * 0.05 }}
                     >
-                      <ListItemText
-                        primary={
-                          <Typography variant="body1" sx={{ fontWeight: 600, mb: 0.5 }}>
-                            {formatDate(workout.workout_date)}
-                          </Typography>
-                        }
-                        secondary={
-                          <Box>
-                            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-                              {workout.total_exercises} exercises • {formatDuration(workout.workout_duration_minutes)}
+                      <ListItem
+                        sx={{
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          borderRadius: 2,
+                          mb: 1.5,
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            borderColor: 'text.secondary',
+                            backgroundColor: 'rgba(0, 0, 0, 0.01)'
+                          }
+                        }}
+                      >
+                        <ListItemText
+                          primary={
+                            <Typography variant="body1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                              {formatDate(workout.workout_date)}
                             </Typography>
-                            <Box display="flex" gap={0.5} flexWrap="wrap">
-                              {workout.exercises?.slice(0, 3).map((exercise, idx) => (
-                                <Chip
-                                  key={idx}
-                                  label={exercise.exercise_name}
-                                  size="small"
-                                  sx={{
-                                    height: 22,
-                                    fontSize: '0.7rem',
-                                    backgroundColor: 'grey.100',
-                                    fontWeight: 500,
-                                    borderRadius: 1
-                                  }}
-                                />
-                              ))}
-                              {workout.exercises?.length > 3 && (
-                                <Chip
-                                  label={`+${workout.exercises.length - 3}`}
-                                  size="small"
-                                  sx={{
-                                    height: 22,
-                                    fontSize: '0.7rem',
-                                    backgroundColor: 'grey.900',
-                                    color: 'white',
-                                    fontWeight: 500,
-                                    borderRadius: 1
-                                  }}
-                                />
-                              )}
+                          }
+                          secondary={
+                            <Box>
+                              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
+                                {workout.total_sets || 0} sets • {exerciseNames.length} exercises • {formatDuration(workout.workout_duration_minutes)}
+                              </Typography>
+                              <Box display="flex" gap={0.5} flexWrap="wrap">
+                                {exerciseNames.slice(0, 3).map((name, idx) => (
+                                  <Chip
+                                    key={idx}
+                                    label={name}
+                                    size="small"
+                                    sx={{
+                                      height: 22,
+                                      fontSize: '0.7rem',
+                                      backgroundColor: 'grey.100',
+                                      fontWeight: 500,
+                                      borderRadius: 1
+                                    }}
+                                  />
+                                ))}
+                                {exerciseNames.length > 3 && (
+                                  <Chip
+                                    label={`+${exerciseNames.length - 3}`}
+                                    size="small"
+                                    sx={{
+                                      height: 22,
+                                      fontSize: '0.7rem',
+                                      backgroundColor: 'grey.900',
+                                      color: 'white',
+                                      fontWeight: 500,
+                                      borderRadius: 1
+                                    }}
+                                  />
+                                )}
+                              </Box>
                             </Box>
-                          </Box>
-                        }
-                      />
-                    </ListItem>
-                  </motion.div>
-                ))}
+                          }
+                        />
+                      </ListItem>
+                    </motion.div>
+                  );
+                })}
               </List>
             )}
           </MotionPaper>

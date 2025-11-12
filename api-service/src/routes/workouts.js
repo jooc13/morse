@@ -44,18 +44,33 @@ router.get('/:deviceUuid', async (req, res) => {
       queryParams.push(endDate);
     }
 
+    // New approach: Group all exercises by workout_date
+    // Each date becomes a single "workout", and each exercise entry is treated as a "set"
     const workoutsQuery = `
-      SELECT 
-        w.id,
-        w.workout_date,
-        w.workout_start_time,
-        w.workout_duration_minutes,
-        w.total_exercises,
-        w.notes,
-        w.created_at,
-        af.original_filename,
-        t.raw_text as transcription,
-        COALESCE(
+      WITH daily_workouts AS (
+        SELECT
+          w.workout_date,
+          w.user_id,
+          MIN(w.workout_start_time) as earliest_start_time,
+          SUM(w.workout_duration_minutes) as total_duration_minutes,
+          COUNT(DISTINCT w.id) as recording_count,
+          json_agg(
+            json_build_object(
+              'workout_id', w.id,
+              'audio_filename', af.original_filename,
+              'transcription', t.raw_text,
+              'recorded_at', w.created_at
+            ) ORDER BY w.created_at
+          ) as recordings
+        FROM workouts w
+        JOIN audio_files af ON w.audio_file_id = af.id
+        LEFT JOIN transcriptions t ON w.transcription_id = t.id
+        WHERE w.user_id = $1 ${dateFilter}
+        GROUP BY w.workout_date, w.user_id
+      ),
+      daily_exercises AS (
+        SELECT
+          w.workout_date,
           json_agg(
             json_build_object(
               'id', e.id,
@@ -70,27 +85,37 @@ router.get('/:deviceUuid', async (req, res) => {
               'effort_level', e.effort_level,
               'rest_seconds', e.rest_seconds,
               'notes', e.notes,
-              'order_in_workout', e.order_in_workout
-            ) ORDER BY e.order_in_workout
-          ) FILTER (WHERE e.id IS NOT NULL), 
-          '[]'
-        ) as exercises
-      FROM workouts w
-      JOIN audio_files af ON w.audio_file_id = af.id
-      LEFT JOIN transcriptions t ON w.transcription_id = t.id
-      LEFT JOIN exercises e ON w.id = e.workout_id
-      WHERE w.user_id = $1 ${dateFilter}
-      GROUP BY w.id, w.workout_date, w.workout_start_time, w.workout_duration_minutes, 
-               w.total_exercises, w.notes, w.created_at, af.original_filename, t.raw_text
-      ORDER BY w.workout_date DESC, w.created_at DESC
+              'order_in_workout', e.order_in_workout,
+              'workout_id', e.workout_id
+            ) ORDER BY w.created_at, e.order_in_workout
+          ) as sets
+        FROM exercises e
+        JOIN workouts w ON e.workout_id = w.id
+        WHERE w.user_id = $1 ${dateFilter}
+        GROUP BY w.workout_date
+      )
+      SELECT
+        dw.workout_date,
+        dw.earliest_start_time as workout_start_time,
+        dw.total_duration_minutes as workout_duration_minutes,
+        dw.recording_count,
+        dw.recordings,
+        COALESCE(de.sets, '[]'::json) as sets,
+        COALESCE(
+          (SELECT COUNT(*) FROM json_array_elements(de.sets)),
+          0
+        ) as total_sets
+      FROM daily_workouts dw
+      LEFT JOIN daily_exercises de ON dw.workout_date = de.workout_date
+      ORDER BY dw.workout_date DESC
       LIMIT $2 OFFSET $3
     `;
 
     const workouts = await client.query(workoutsQuery, queryParams);
 
     const totalCountQuery = `
-      SELECT COUNT(*) 
-      FROM workouts w 
+      SELECT COUNT(DISTINCT workout_date)
+      FROM workouts w
       WHERE w.user_id = $1 ${dateFilter}
     `;
     const totalCountParams = [userId];

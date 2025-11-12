@@ -3,9 +3,6 @@ import {
   Box,
   Typography,
   Paper,
-  List,
-  ListItem,
-  ListItemText,
   Chip,
   Grid,
   Card,
@@ -25,11 +22,12 @@ import {
   CalendarToday,
   List as ListIcon
 } from '@mui/icons-material';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import api from '../services/api';
 
 const MotionPaper = motion(Paper);
 const MotionAccordion = motion(Accordion);
+const MotionBox = motion(Box);
 
 const WorkoutList = ({ deviceUuid }) => {
   const [workouts, setWorkouts] = useState([]);
@@ -106,40 +104,56 @@ const WorkoutList = ({ deviceUuid }) => {
     return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
   };
 
-  const formatExerciseDetails = (exercise) => {
-    const details = [];
-    
-    if (exercise.sets) {
-      details.push(`${exercise.sets} sets`);
+  // Format a single set's details (weight x reps)
+  const formatSetDetails = (set) => {
+    const parts = [];
+
+    // Weight x Reps format (most common for strength training)
+    if (set.weight_lbs && set.weight_lbs.length > 0 && set.reps && set.reps.length > 0) {
+      const weight = set.weight_lbs[0];
+      const reps = set.reps[0];
+      return `${weight} lbs × ${reps} reps`;
     }
-    
-    if (exercise.reps && exercise.reps.length > 0) {
-      const repsStr = exercise.reps.length === 1 
-        ? `${exercise.reps[0]} reps`
-        : `${exercise.reps.join(', ')} reps`;
-      details.push(repsStr);
+
+    // Just reps (bodyweight exercises)
+    if (set.reps && set.reps.length > 0) {
+      return `${set.reps[0]} reps`;
     }
-    
-    if (exercise.weight_lbs && exercise.weight_lbs.length > 0) {
-      const weightStr = exercise.weight_lbs.length === 1
-        ? `${exercise.weight_lbs[0]} lbs`
-        : `${exercise.weight_lbs.join(', ')} lbs`;
-      details.push(weightStr);
+
+    // Duration based (cardio)
+    if (set.duration_minutes) {
+      parts.push(`${set.duration_minutes} min`);
     }
-    
-    if (exercise.duration_minutes) {
-      details.push(`${exercise.duration_minutes} min`);
+
+    // Distance based
+    if (set.distance_miles) {
+      parts.push(`${set.distance_miles} miles`);
     }
-    
-    if (exercise.distance_miles) {
-      details.push(`${exercise.distance_miles} miles`);
-    }
-    
-    if (exercise.effort_level) {
-      details.push(`Effort: ${exercise.effort_level}/10`);
-    }
-    
-    return details.join(' • ');
+
+    return parts.length > 0 ? parts.join(' • ') : 'Completed';
+  };
+
+  // Group sets by exercise name
+  const groupSetsByExercise = (sets) => {
+    const grouped = {};
+
+    if (!sets || sets.length === 0) return grouped;
+
+    sets.forEach((set) => {
+      const name = set.exercise_name;
+      if (!grouped[name]) {
+        grouped[name] = {
+          exercise_name: name,
+          exercise_type: set.exercise_type,
+          muscle_groups: set.muscle_groups,
+          notes: set.notes,
+          sets: []
+        };
+      }
+      grouped[name].sets.push(set);
+    });
+
+    return grouped;
   };
 
   const getExerciseTypeColor = (type) => {
@@ -317,210 +331,367 @@ const WorkoutList = ({ deviceUuid }) => {
             Showing {workouts.length} of {pagination.total} workouts
           </Typography>
 
-          {workouts.map((workout, index) => (
-            <MotionAccordion
-              key={workout.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, delay: index * 0.05 }}
-              sx={{
-                mb: 2,
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: '12px !important',
-                '&:before': { display: 'none' },
-                '&.Mui-expanded': {
-                  margin: '0 0 16px 0'
-                },
-                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                '&:hover': {
-                  borderColor: 'text.secondary',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)'
-                }
-              }}
-            >
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Box sx={{ flexGrow: 1 }}>
-                  <Grid container alignItems="center" spacing={2}>
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box display="flex" alignItems="center">
-                        <CalendarToday sx={{ mr: 1, fontSize: 20 }} />
-                        <Typography variant="h6">
-                          {formatDate(workout.workout_date)}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box display="flex" alignItems="center">
-                        <FitnessCenter sx={{ mr: 1, fontSize: 20 }} />
-                        <Typography variant="body1">
-                          {workout.total_exercises} exercises
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box display="flex" alignItems="center">
-                        <Timer sx={{ mr: 1, fontSize: 20 }} />
-                        <Typography variant="body1">
-                          {formatDuration(workout.workout_duration_minutes)}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    
-                    <Grid item xs={12} sm={6} md={3}>
-                      {workout.workout_start_time && (
-                        <Typography variant="body2" color="textSecondary">
-                          Started: {formatTime(workout.workout_start_time)}
-                        </Typography>
-                      )}
-                    </Grid>
-                  </Grid>
-                </Box>
-              </AccordionSummary>
-              
-              <AccordionDetails>
-                <Box>
-                  {workout.transcription && (
-                    <Card
-                      sx={{
-                        mb: 2,
-                        bgcolor: 'grey.50',
-                        border: '1px solid',
-                        borderColor: 'grey.200',
-                        borderRadius: 2
-                      }}
-                    >
-                      <CardContent>
-                        <Typography
-                          variant="overline"
-                          sx={{
-                            color: 'text.secondary',
-                            fontSize: '0.7rem',
-                            fontWeight: 600,
-                            letterSpacing: '0.1em'
-                          }}
-                        >
-                          Original Audio Transcription
-                        </Typography>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            fontStyle: 'italic',
-                            color: 'text.primary',
-                            mt: 1,
-                            lineHeight: 1.6
-                          }}
-                        >
-                          "{workout.transcription}"
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  )}
-                  
-                  {workout.exercises && workout.exercises.length > 0 ? (
-                    <List>
-                      {workout.exercises.map((exercise, index) => (
-                        <div key={exercise.id}>
-                          <ListItem sx={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-                            <Box sx={{ width: '100%', mb: 1 }}>
-                              <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
-                                <Typography variant="h6">
-                                  {exercise.exercise_name}
-                                </Typography>
-                                <Box>
-                                  <Chip
-                                    label={exercise.exercise_type || 'other'}
-                                    color={getExerciseTypeColor(exercise.exercise_type)}
-                                    size="small"
-                                    sx={{ mr: 1 }}
-                                  />
-                                  <Typography variant="body2" component="span" color="textSecondary">
-                                    #{exercise.order_in_workout}
-                                  </Typography>
-                                </Box>
-                              </Box>
-                              
-                              <Typography variant="body1" sx={{ mb: 1 }}>
-                                {formatExerciseDetails(exercise)}
+          {workouts.map((workout, workoutIndex) => {
+            const groupedExercises = groupSetsByExercise(workout.sets || []);
+            const exerciseNames = Object.keys(groupedExercises);
+
+            return (
+              <MotionAccordion
+                key={`${workout.workout_date}-${workoutIndex}`}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, delay: workoutIndex * 0.05 }}
+                sx={{
+                  mb: 3,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: '12px !important',
+                  '&:before': { display: 'none' },
+                  '&.Mui-expanded': {
+                    margin: '0 0 24px 0'
+                  },
+                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                  '&:hover': {
+                    borderColor: 'text.secondary',
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)'
+                  }
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon />}
+                  sx={{
+                    px: 3,
+                    py: 2
+                  }}
+                >
+                  <Box sx={{ flexGrow: 1 }}>
+                    <Grid container alignItems="center" spacing={2}>
+                      <Grid item xs={12} md={4}>
+                        <Box display="flex" alignItems="center" gap={1.5}>
+                          <CalendarToday sx={{ fontSize: 20, color: 'text.secondary' }} />
+                          <Box>
+                            <Typography
+                              variant="h6"
+                              sx={{
+                                fontWeight: 700,
+                                letterSpacing: '-0.01em',
+                                mb: 0.25
+                              }}
+                            >
+                              {formatDate(workout.workout_date)}
+                            </Typography>
+                            {workout.workout_start_time && (
+                              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                Started at {formatTime(workout.workout_start_time)}
                               </Typography>
-                              
-                              {exercise.muscle_groups && exercise.muscle_groups.length > 0 && (
-                                <Box sx={{ mb: 1 }}>
-                                  {exercise.muscle_groups.map((muscle, idx) => (
+                            )}
+                          </Box>
+                        </Box>
+                      </Grid>
+
+                      <Grid item xs={12} sm={4} md={3}>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <FitnessCenter sx={{ fontSize: 20, color: 'text.secondary' }} />
+                          <Box>
+                            <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                              {workout.total_sets || 0} sets
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              {exerciseNames.length} exercises
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </Grid>
+
+                      <Grid item xs={12} sm={4} md={3}>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Timer sx={{ fontSize: 20, color: 'text.secondary' }} />
+                          <Box>
+                            <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                              {formatDuration(workout.workout_duration_minutes)}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              total duration
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </Grid>
+
+                      <Grid item xs={12} sm={4} md={2}>
+                        <Chip
+                          label={`${workout.recording_count || 1} recording${workout.recording_count > 1 ? 's' : ''}`}
+                          size="small"
+                          sx={{
+                            backgroundColor: 'grey.100',
+                            color: 'text.secondary',
+                            fontWeight: 500,
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                      </Grid>
+                    </Grid>
+                  </Box>
+                </AccordionSummary>
+
+                <AccordionDetails sx={{ px: 3, pb: 3 }}>
+                  <Box>
+                    {/* Display exercises grouped by name with their sets */}
+                    {exerciseNames.length > 0 ? (
+                      <Box>
+                        {exerciseNames.map((exerciseName, exerciseIndex) => {
+                          const exercise = groupedExercises[exerciseName];
+
+                          return (
+                            <MotionBox
+                              key={exerciseName}
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ duration: 0.2, delay: exerciseIndex * 0.05 }}
+                              sx={{ mb: 3 }}
+                            >
+                              <Box
+                                sx={{
+                                  p: 3,
+                                  border: '1px solid',
+                                  borderColor: 'divider',
+                                  borderRadius: 2,
+                                  backgroundColor: 'background.paper',
+                                  transition: 'all 0.2s',
+                                  '&:hover': {
+                                    borderColor: 'text.secondary',
+                                    backgroundColor: 'rgba(0, 0, 0, 0.01)'
+                                  }
+                                }}
+                              >
+                                {/* Exercise header */}
+                                <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+                                  <Typography
+                                    variant="h6"
+                                    sx={{
+                                      fontWeight: 700,
+                                      letterSpacing: '-0.01em'
+                                    }}
+                                  >
+                                    {exerciseName}
+                                  </Typography>
+                                  {exercise.exercise_type && (
                                     <Chip
-                                      key={idx}
-                                      label={muscle}
+                                      label={exercise.exercise_type}
                                       size="small"
-                                      variant="outlined"
                                       sx={{
-                                        mr: 0.5,
-                                        mb: 0.5,
-                                        borderColor: 'grey.300',
-                                        color: 'text.secondary',
-                                        fontSize: '0.75rem',
+                                        backgroundColor: 'grey.900',
+                                        color: 'white',
                                         fontWeight: 500,
-                                        borderRadius: 1.5
+                                        fontSize: '0.7rem',
+                                        height: 22,
+                                        borderRadius: 1
                                       }}
                                     />
+                                  )}
+                                </Box>
+
+                                {/* Sets list */}
+                                <Box sx={{ ml: 0, mb: 2 }}>
+                                  {exercise.sets.map((set, setIndex) => (
+                                    <Box
+                                      key={set.id}
+                                      sx={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        py: 1,
+                                        borderBottom: setIndex < exercise.sets.length - 1 ? '1px solid' : 'none',
+                                        borderColor: 'divider'
+                                      }}
+                                    >
+                                      <Box
+                                        sx={{
+                                          minWidth: 60,
+                                          mr: 2
+                                        }}
+                                      >
+                                        <Typography
+                                          variant="caption"
+                                          sx={{
+                                            color: 'text.secondary',
+                                            fontWeight: 600,
+                                            fontSize: '0.75rem',
+                                            letterSpacing: '0.05em'
+                                          }}
+                                        >
+                                          SET {setIndex + 1}
+                                        </Typography>
+                                      </Box>
+                                      <Typography
+                                        variant="body1"
+                                        sx={{
+                                          fontWeight: 600,
+                                          color: 'text.primary',
+                                          fontVariantNumeric: 'tabular-nums'
+                                        }}
+                                      >
+                                        {formatSetDetails(set)}
+                                      </Typography>
+                                      {set.effort_level && (
+                                        <Chip
+                                          label={`RPE ${set.effort_level}`}
+                                          size="small"
+                                          sx={{
+                                            ml: 'auto',
+                                            height: 20,
+                                            fontSize: '0.7rem',
+                                            backgroundColor: 'grey.100',
+                                            color: 'text.secondary',
+                                            fontWeight: 500
+                                          }}
+                                        />
+                                      )}
+                                    </Box>
                                   ))}
                                 </Box>
-                              )}
-                              
-                              {exercise.notes && (
-                                <Typography variant="body2" color="textSecondary" sx={{ fontStyle: 'italic' }}>
-                                  Notes: {exercise.notes}
-                                </Typography>
-                              )}
-                            </Box>
-                          </ListItem>
-                          {index < workout.exercises.length - 1 && <Divider />}
-                        </div>
-                      ))}
-                    </List>
-                  ) : (
-                    <Typography color="textSecondary" sx={{ textAlign: 'center', py: 2 }}>
-                      No exercise details available
-                    </Typography>
-                  )}
-                  
-                  {workout.notes && (
-                    <Card
-                      sx={{
-                        mt: 2,
-                        bgcolor: 'grey.900',
-                        color: 'white',
-                        border: '1px solid',
-                        borderColor: 'grey.800',
-                        borderRadius: 2
-                      }}
-                    >
-                      <CardContent>
+
+                                {/* Muscle groups */}
+                                {exercise.muscle_groups && exercise.muscle_groups.length > 0 && (
+                                  <Box sx={{ mb: 2 }}>
+                                    <Typography
+                                      variant="caption"
+                                      sx={{
+                                        color: 'text.secondary',
+                                        fontWeight: 600,
+                                        fontSize: '0.7rem',
+                                        letterSpacing: '0.1em',
+                                        textTransform: 'uppercase',
+                                        display: 'block',
+                                        mb: 1
+                                      }}
+                                    >
+                                      Muscle Groups
+                                    </Typography>
+                                    <Box display="flex" gap={0.5} flexWrap="wrap">
+                                      {exercise.muscle_groups.map((muscle, idx) => (
+                                        <Chip
+                                          key={idx}
+                                          label={muscle}
+                                          size="small"
+                                          variant="outlined"
+                                          sx={{
+                                            borderColor: 'grey.300',
+                                            color: 'text.secondary',
+                                            fontSize: '0.7rem',
+                                            fontWeight: 500,
+                                            height: 22,
+                                            borderRadius: 1
+                                          }}
+                                        />
+                                      ))}
+                                    </Box>
+                                  </Box>
+                                )}
+
+                                {/* Exercise notes */}
+                                {exercise.notes && (
+                                  <Box
+                                    sx={{
+                                      mt: 2,
+                                      p: 2,
+                                      backgroundColor: 'grey.50',
+                                      borderRadius: 1.5,
+                                      border: '1px solid',
+                                      borderColor: 'grey.200'
+                                    }}
+                                  >
+                                    <Typography
+                                      variant="body2"
+                                      sx={{
+                                        color: 'text.primary',
+                                        fontStyle: 'italic',
+                                        lineHeight: 1.6
+                                      }}
+                                    >
+                                      {exercise.notes}
+                                    </Typography>
+                                  </Box>
+                                )}
+                              </Box>
+                            </MotionBox>
+                          );
+                        })}
+                      </Box>
+                    ) : (
+                      <Box
+                        sx={{
+                          textAlign: 'center',
+                          py: 4,
+                          color: 'text.secondary'
+                        }}
+                      >
+                        <FitnessCenter sx={{ fontSize: 48, mb: 2, opacity: 0.3 }} />
+                        <Typography variant="body2">
+                          No exercise data recorded for this day
+                        </Typography>
+                      </Box>
+                    )}
+
+                    {/* Show recordings if multiple */}
+                    {workout.recordings && workout.recordings.length > 1 && (
+                      <Box sx={{ mt: 3 }}>
+                        <Divider sx={{ mb: 2 }} />
                         <Typography
-                          variant="overline"
+                          variant="caption"
                           sx={{
-                            color: 'grey.300',
-                            fontSize: '0.7rem',
+                            color: 'text.secondary',
                             fontWeight: 600,
-                            letterSpacing: '0.1em'
+                            fontSize: '0.7rem',
+                            letterSpacing: '0.1em',
+                            textTransform: 'uppercase',
+                            display: 'block',
+                            mb: 1.5
                           }}
                         >
-                          Workout Notes
+                          Audio Recordings ({workout.recordings.length})
                         </Typography>
-                        <Typography
-                          variant="body2"
-                          sx={{ color: 'white', mt: 1, lineHeight: 1.6 }}
-                        >
-                          {workout.notes}
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  )}
-                </Box>
-              </AccordionDetails>
-            </MotionAccordion>
-          ))}
+                        <Grid container spacing={1.5}>
+                          {workout.recordings.map((recording, idx) => (
+                            <Grid item xs={12} sm={6} key={recording.workout_id}>
+                              <Card
+                                sx={{
+                                  p: 1.5,
+                                  bgcolor: 'grey.50',
+                                  border: '1px solid',
+                                  borderColor: 'grey.200',
+                                  borderRadius: 1.5
+                                }}
+                              >
+                                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>
+                                  Recording {idx + 1}
+                                </Typography>
+                                <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5, fontSize: '0.8rem' }}>
+                                  {recording.audio_filename}
+                                </Typography>
+                                {recording.transcription && (
+                                  <Typography
+                                    variant="caption"
+                                    sx={{
+                                      color: 'text.secondary',
+                                      fontStyle: 'italic',
+                                      display: 'block',
+                                      fontSize: '0.7rem',
+                                      lineHeight: 1.4
+                                    }}
+                                  >
+                                    "{recording.transcription.substring(0, 80)}..."
+                                  </Typography>
+                                )}
+                              </Card>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </Box>
+                    )}
+                  </Box>
+                </AccordionDetails>
+              </MotionAccordion>
+            );
+          })}
           
           {pagination.hasMore && (
             <Box textAlign="center" mt={3}>
