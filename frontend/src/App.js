@@ -1,13 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { ThemeProvider } from '@mui/material/styles';
-import { CssBaseline, Box, AppBar, Toolbar, Typography, Container, IconButton } from '@mui/material';
+import { CssBaseline, Box, AppBar, Toolbar, Typography, Container } from '@mui/material';
 import { motion } from 'framer-motion';
-import { FitnessCenter, Dashboard as DashboardIcon, Timeline, List } from '@mui/icons-material';
-import Dashboard from './components/Dashboard';
-import WorkoutList from './components/WorkoutList';
+import { FitnessCenter } from '@mui/icons-material';
 import MinimalWorkoutDisplay from './components/MinimalWorkoutDisplay';
-import ProgressChart from './components/ProgressChart';
 import api from './services/api';
 import theme from './theme';
 
@@ -65,16 +61,10 @@ function App() {
     );
   }
 
-  const navItems = [
-    { path: '/', icon: DashboardIcon, label: 'Dashboard' },
-    { path: '/workouts', icon: List, label: 'Workouts' },
-    { path: '/progress', icon: Timeline, label: 'Progress' },
-  ];
-
+  
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Router>
         <Box sx={{
           minHeight: '100vh',
           backgroundColor: 'background.default',
@@ -112,52 +102,7 @@ function App() {
                   </Typography>
                 </Box>
 
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                  {navItems.map((item) => (
-                    <NavLink
-                      key={item.path}
-                      to={item.path}
-                      style={({ isActive }) => ({
-                        textDecoration: 'none',
-                        color: 'inherit',
-                      })}
-                    >
-                      {({ isActive }) => (
-                        <motion.div
-                          whileHover={{ y: -1 }}
-                          whileTap={{ scale: 0.98 }}
-                        >
-                          <Box
-                            sx={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 0.5,
-                              px: 2,
-                              py: 1,
-                              borderRadius: 2,
-                              backgroundColor: isActive ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
-                              color: isActive ? 'text.primary' : 'text.secondary',
-                              fontWeight: isActive ? 600 : 500,
-                              fontSize: '0.875rem',
-                              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                              cursor: 'pointer',
-                              '&:hover': {
-                                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                                color: 'text.primary',
-                              },
-                            }}
-                          >
-                            <item.icon sx={{ fontSize: 18 }} />
-                            <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
-                              {item.label}
-                            </Box>
-                          </Box>
-                        </motion.div>
-                      )}
-                    </NavLink>
-                  ))}
-                </Box>
-
+  
                 <Typography
                   variant="caption"
                   sx={{
@@ -192,25 +137,9 @@ function App() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3 }}
             >
-              <Routes>
-                <Route
-                  path="/"
-                  element={
-                    <MinimalWorkoutDisplay
-                      deviceUuid={deviceUuid}
-                    />
-                  }
-                />
-                <Route
-                  path="/workouts"
-                  element={<WorkoutList deviceUuid={deviceUuid} />}
-                />
-                <Route
-                  path="/progress"
-                  element={<ProgressChart deviceUuid={deviceUuid} />}
-                />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
+              <MinimalWorkoutDisplay
+                deviceUuid={deviceUuid}
+              />
             </motion.div>
           </Container>
 
@@ -236,7 +165,6 @@ function App() {
             </Container>
           </Box>
         </Box>
-      </Router>
     </ThemeProvider>
   );
 }
