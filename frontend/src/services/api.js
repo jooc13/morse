@@ -112,6 +112,17 @@ const apiService = {
     const response = await api.get(`/workouts/${deviceUuid}/llm-summary?days=${days}`);
     return response.data;
   },
+
+  // Progress tracking endpoints
+  async getFileProgress(audioFileId) {
+    const response = await api.get(`/upload/progress/${audioFileId}`);
+    return response.data;
+  },
+
+  async getActiveProcessingFiles() {
+    const response = await api.get('/upload/active-files');
+    return response.data;
+  },
 };
 
 export default apiService;

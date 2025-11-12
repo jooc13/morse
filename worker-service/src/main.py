@@ -43,27 +43,40 @@ class WorkoutProcessor:
 
     async def process_audio_file(self, job_data: Dict[str, Any]) -> bool:
         """Process a single audio file through the transcription and LLM pipeline"""
+        audio_file_id = job_data['audioFileId']
+
         try:
-            audio_file_id = job_data['audioFileId']
             file_path = job_data['filePath']
             user_id = job_data['userId']
             device_uuid = job_data['deviceUuid']
-            
+
             logger.info(f"Processing audio file {audio_file_id} for user {device_uuid}")
-            
+
+            # Initialize processing stages
+            await self.db.init_processing_stages(audio_file_id)
+
             # Update status to processing
-            logger.info("Updating audio file status to processing...")
             await self.db.update_audio_file_status(audio_file_id, 'processing')
-            
+
             # Step 1: Transcribe audio
-            logger.info(f"Transcribing audio file: {file_path}")
+            logger.info(f"Starting transcription for file: {file_path}")
+            await self.db.update_stage_progress(
+                audio_file_id, 'transcription', 10, 'in_progress', 'Starting Whisper transcription'
+            )
+
             transcription_result = await self.transcriber.transcribe_audio(file_path)
-            
+
             if not transcription_result['success']:
-                logger.error(f"Transcription failed: {transcription_result['error']}")
+                error_msg = f"Transcription failed: {transcription_result['error']}"
+                logger.error(error_msg)
+                await self.db.fail_stage(audio_file_id, 'transcription', error_msg)
                 await self.db.update_audio_file_status(audio_file_id, 'failed')
                 return False
-            
+
+            await self.db.update_stage_progress(
+                audio_file_id, 'transcription', 80, 'in_progress', 'Transcription completed, saving to database'
+            )
+
             # Save transcription to database
             transcription_id = await self.db.save_transcription(
                 audio_file_id,
@@ -71,49 +84,87 @@ class WorkoutProcessor:
                 transcription_result.get('confidence', 0.0),
                 transcription_result.get('processing_time_ms', 0)
             )
-            
+
             # Update audio file with duration
             duration_seconds = transcription_result.get('duration_seconds', 0.0)
             if duration_seconds > 0:
                 await self.db.update_audio_file_duration(audio_file_id, duration_seconds)
-            
-            logger.info(f"Saved transcription {transcription_id}")
-            
+
+            await self.db.complete_stage(
+                audio_file_id, 'transcription', f'Transcription saved (ID: {transcription_id})'
+            )
+            logger.info(f"Completed transcription stage for {audio_file_id}")
+
             # Step 2: Process with LLM to extract workout data
-            logger.info("Processing transcription with LLM")
+            logger.info("Starting LLM processing")
+            await self.db.update_stage_progress(
+                audio_file_id, 'llm_processing', 20, 'in_progress', 'Analyzing transcript with AI'
+            )
+
             workout_data = await self.llm_processor.extract_workout_data(
                 transcription_result['text'],
                 device_uuid
             )
-            
+
             if not workout_data['success']:
-                logger.error(f"LLM processing failed: {workout_data['error']}")
+                error_msg = f"LLM processing failed: {workout_data['error']}"
+                logger.error(error_msg)
+                await self.db.fail_stage(audio_file_id, 'llm_processing', error_msg)
                 await self.db.update_audio_file_status(audio_file_id, 'failed')
                 return False
-            
+
+            exercises_count = len(workout_data['workout'].get('exercises', []))
+            await self.db.complete_stage(
+                audio_file_id, 'llm_processing', f'Extracted {exercises_count} exercises from transcript'
+            )
+            logger.info(f"Completed LLM processing stage for {audio_file_id}")
+
             # Step 3: Save workout and exercise data
+            logger.info("Saving workout data to database")
+            await self.db.update_stage_progress(
+                audio_file_id, 'data_saving', 30, 'in_progress', 'Saving workout and exercises to database'
+            )
+
             workout_id = await self.db.save_workout_data(
                 user_id,
                 audio_file_id,
                 transcription_id,
                 workout_data['workout']
             )
-            
-            logger.info(f"Saved workout {workout_id}")
-            
-            # Update status to completed
+
+            await self.db.complete_stage(
+                audio_file_id, 'data_saving', f'Workout saved (ID: {workout_id}) with {exercises_count} exercises'
+            )
+            logger.info(f"Completed data saving stage for {audio_file_id}")
+
+            # Update final status to completed
             await self.db.update_audio_file_status(audio_file_id, 'completed')
             await self.db.mark_audio_file_processed(audio_file_id)
-            
+
             logger.info(f"Successfully processed audio file {audio_file_id}")
             return True
-            
+
         except Exception as e:
-            logger.error(f"Error processing audio file: {str(e)}")
+            error_msg = f"Error processing audio file: {str(e)}"
+            logger.error(error_msg)
+
             try:
-                await self.db.update_audio_file_status(job_data['audioFileId'], 'failed')
+                # Try to determine which stage failed and mark it
+                import traceback
+                tb_str = traceback.format_exc()
+
+                if 'transcrib' in str(e).lower():
+                    await self.db.fail_stage(audio_file_id, 'transcription', error_msg)
+                elif 'llm' in str(e).lower() or 'extract_workout' in tb_str:
+                    await self.db.fail_stage(audio_file_id, 'llm_processing', error_msg)
+                elif 'save_workout' in tb_str:
+                    await self.db.fail_stage(audio_file_id, 'data_saving', error_msg)
+
+                await self.db.update_audio_file_status(audio_file_id, 'failed')
             except:
-                pass
+                # If we can't even update the error status, just log
+                logger.error(f"Failed to update error status for file {audio_file_id}")
+
             return False
 
     async def poll_for_jobs(self):

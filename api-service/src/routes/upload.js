@@ -151,24 +151,45 @@ router.get('/queue/stats', async (req, res) => {
   }
 });
 
+router.get('/progress/:audioFileId', async (req, res) => {
+  try {
+    const { audioFileId } = req.params;
+    const progress = await getFileProgress(audioFileId);
+    res.json(progress);
+  } catch (error) {
+    console.error('Progress check error:', error);
+    res.status(500).json({ error: 'Failed to get file progress' });
+  }
+});
+
+router.get('/active-files', async (req, res) => {
+  try {
+    const activeFiles = await getActiveProcessingFiles();
+    res.json(activeFiles);
+  } catch (error) {
+    console.error('Active files error:', error);
+    res.status(500).json({ error: 'Failed to get active files' });
+  }
+});
+
 async function getDatabaseStats() {
   const client = await pool.connect();
   try {
     const result = await client.query(`
-      SELECT 
+      SELECT
         transcription_status,
         COUNT(*) as count
-      FROM audio_files 
+      FROM audio_files
       GROUP BY transcription_status
     `);
-    
+
     const stats = {
       waiting: 0,
       active: 0,
       completed: 0,
       failed: 0
     };
-    
+
     result.rows.forEach(row => {
       switch (row.transcription_status) {
         case 'pending':
@@ -186,8 +207,112 @@ async function getDatabaseStats() {
           break;
       }
     });
-    
+
     return stats;
+  } finally {
+    client.release();
+  }
+}
+
+async function getFileProgress(audioFileId) {
+  const client = await pool.connect();
+  try {
+    // Get audio file basic info
+    const fileResult = await client.query(`
+      SELECT
+        af.id,
+        af.original_filename,
+        af.transcription_status,
+        af.processing_progress,
+        af.processing_stage,
+        af.processing_message,
+        af.upload_timestamp
+      FROM audio_files af
+      WHERE af.id = $1
+    `, [audioFileId]);
+
+    if (fileResult.rows.length === 0) {
+      return { error: 'File not found' };
+    }
+
+    const fileInfo = fileResult.rows[0];
+
+    // Get detailed progress for each stage
+    const progressResult = await client.query(`
+      SELECT
+        stage,
+        progress_percent,
+        status,
+        message,
+        started_at,
+        completed_at
+      FROM file_processing_progress
+      WHERE audio_file_id = $1
+      ORDER BY created_at
+    `, [audioFileId]);
+
+    const stages = progressResult.rows;
+
+    // Calculate overall progress
+    let overallProgress = 0;
+    if (stages.length > 0) {
+      overallProgress = Math.round(
+        stages.reduce((sum, stage) => sum + stage.progress_percent, 0) / stages.length
+      );
+    }
+
+    return {
+      audioFileId: fileInfo.id,
+      filename: fileInfo.original_filename,
+      status: fileInfo.transcription_status,
+      overallProgress,
+      currentStage: fileInfo.processing_stage,
+      currentMessage: fileInfo.processing_message,
+      stages: stages.map(stage => ({
+        name: stage.stage,
+        progress: stage.progress_percent,
+        status: stage.status,
+        message: stage.message,
+        startedAt: stage.started_at,
+        completedAt: stage.completed_at
+      })),
+      createdAt: fileInfo.upload_timestamp,
+      updatedAt: fileInfo.upload_timestamp
+    };
+  } finally {
+    client.release();
+  }
+}
+
+async function getActiveProcessingFiles() {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(`
+      SELECT
+        af.id,
+        af.original_filename,
+        af.transcription_status,
+        af.processing_progress,
+        af.processing_stage,
+        af.processing_message,
+        af.upload_timestamp,
+        u.device_uuid
+      FROM audio_files af
+      JOIN users u ON af.user_id = u.id
+      WHERE af.transcription_status IN ('queued', 'processing')
+      ORDER BY af.upload_timestamp DESC
+    `);
+
+    return result.rows.map(file => ({
+      audioFileId: file.id,
+      filename: file.original_filename,
+      status: file.transcription_status,
+      progress: file.processing_progress || 0,
+      stage: file.processing_stage || 'uploaded',
+      message: file.processing_message,
+      deviceUuid: file.device_uuid,
+      createdAt: file.upload_timestamp
+    }));
   } finally {
     client.release();
   }

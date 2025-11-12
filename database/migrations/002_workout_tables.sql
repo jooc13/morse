@@ -68,17 +68,17 @@ CREATE TABLE IF NOT EXISTS user_progress (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes for performance
-CREATE INDEX idx_transcriptions_audio_file_id ON transcriptions(audio_file_id);
-CREATE INDEX idx_workouts_user_id ON workouts(user_id);
-CREATE INDEX idx_workouts_date ON workouts(workout_date);
-CREATE INDEX idx_exercises_workout_id ON exercises(workout_id);
-CREATE INDEX idx_exercises_name ON exercises(exercise_name);
-CREATE INDEX idx_user_progress_user_id ON user_progress(user_id);
-CREATE INDEX idx_user_progress_exercise ON user_progress(exercise_name);
-CREATE INDEX idx_user_progress_date ON user_progress(recorded_date);
+-- Indexes for performance (with IF NOT EXISTS for idempotency)
+CREATE INDEX IF NOT EXISTS idx_transcriptions_audio_file_id ON transcriptions(audio_file_id);
+CREATE INDEX IF NOT EXISTS idx_workouts_user_id ON workouts(user_id);
+CREATE INDEX IF NOT EXISTS idx_workouts_date ON workouts(workout_date);
+CREATE INDEX IF NOT EXISTS idx_exercises_workout_id ON exercises(workout_id);
+CREATE INDEX IF NOT EXISTS idx_exercises_name ON exercises(exercise_name);
+CREATE INDEX IF NOT EXISTS idx_user_progress_user_id ON user_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_progress_exercise ON user_progress(exercise_name);
+CREATE INDEX IF NOT EXISTS idx_user_progress_date ON user_progress(recorded_date);
 
--- Insert some common exercises into the library
+-- Insert some common exercises into the library (with conflict resolution for idempotency)
 INSERT INTO exercise_library (name, category, primary_muscle_groups, secondary_muscle_groups, difficulty_level) VALUES
 ('Push-ups', 'Bodyweight', ARRAY['Chest', 'Triceps'], ARRAY['Shoulders', 'Core'], 2),
 ('Pull-ups', 'Bodyweight', ARRAY['Lats', 'Biceps'], ARRAY['Rhomboids', 'Middle traps'], 4),
@@ -89,4 +89,5 @@ INSERT INTO exercise_library (name, category, primary_muscle_groups, secondary_m
 ('Plank', 'Bodyweight', ARRAY['Core'], ARRAY['Shoulders'], 2),
 ('Running', 'Cardio', ARRAY['Legs'], ARRAY['Core', 'Cardiovascular'], 2),
 ('Overhead Press', 'Barbell', ARRAY['Shoulders', 'Triceps'], ARRAY['Core'], 3),
-('Rows', 'Barbell', ARRAY['Lats', 'Rhomboids'], ARRAY['Biceps', 'Middle traps'], 3);
+('Rows', 'Barbell', ARRAY['Lats', 'Rhomboids'], ARRAY['Biceps', 'Middle traps'], 3)
+ON CONFLICT (name) DO NOTHING;
