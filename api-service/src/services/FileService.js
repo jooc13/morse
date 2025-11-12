@@ -18,16 +18,29 @@ class FileService {
   }
 
   parseFilename(filename) {
-    const match = filename.match(/^([^_]+)_(\d+)\.(mp3|m4a)$/i);
-    if (!match) {
-      throw new Error('Invalid filename format. Expected: deviceId_timestamp.mp3 or deviceId_timestamp.m4a');
+    // Try the specific format first: deviceId_timestamp.mp3
+    const specificMatch = filename.match(/^([^_]+)_(\d+)\.(mp3|m4a)$/i);
+    if (specificMatch) {
+      const [, deviceUuid, timestamp] = specificMatch;
+      return {
+        deviceUuid,
+        timestamp: parseInt(timestamp),
+        timestampDate: new Date(parseInt(timestamp))
+      };
     }
 
-    const [, deviceUuid, timestamp] = match;
+    // Fallback for regular filenames - generate a device UUID and use current time
+    const { v4: uuidv4 } = require('uuid');
+    const currentTime = Date.now();
+
+    // Extract just the name without extension for device UUID
+    const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+    const deviceUuid = nameWithoutExt.replace(/[^a-zA-Z0-9]/g, '') || 'default-device';
+
     return {
-      deviceUuid,
-      timestamp: parseInt(timestamp),
-      timestampDate: new Date(parseInt(timestamp))
+      deviceUuid: deviceUuid.substring(0, 20), // Limit length
+      timestamp: currentTime,
+      timestampDate: new Date(currentTime)
     };
   }
 

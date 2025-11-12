@@ -29,14 +29,33 @@ const MinimalWorkoutDisplay = ({ deviceUuid }) => {
     const file = event.target.files[0];
     if (!file) return;
 
+    // File validation
+    const allowedTypes = ['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a', 'audio/x-m4a'];
+    const allowedExtensions = ['.mp3', '.m4a'];
+    const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+
+    if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
+      alert('Please upload an MP3 or M4A audio file.');
+      return;
+    }
+
+    if (file.size > 50 * 1024 * 1024) { // 50MB limit
+      alert('File size must be less than 50MB.');
+      return;
+    }
+
     setUploading(true);
     try {
-      await api.uploadAudio(file);
+      console.log('Starting upload for file:', file.name, 'Size:', file.size, 'Type:', file.type);
+      const result = await api.uploadAudio(file);
+      console.log('Upload successful:', result);
+      alert(`Upload successful! Audio file queued for processing.`);
       // Refresh workouts after upload
       setTimeout(() => loadWorkouts(), 2000);
     } catch (error) {
       console.error('Upload failed:', error);
-      alert('Upload failed. Please try again.');
+      const errorMessage = error.response?.data?.error || error.message || 'Upload failed';
+      alert(`Upload failed: ${errorMessage}. Please try again.`);
     } finally {
       setUploading(false);
     }
