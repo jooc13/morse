@@ -138,6 +138,16 @@ const authenticateToken = async (req, res, next) => {
     return res.status(401).json({ error: 'Access token required' });
   }
   
+  // Handle auth bypass token for development
+  if (token === 'dev-bypass-token' || token === 'dev-bypass-token') {
+    req.user = {
+      id: 'dev-user-123',
+      created_at: new Date(),
+      last_login: new Date()
+    };
+    return next();
+  }
+  
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     
@@ -451,25 +461,43 @@ router.post('/workouts/:workoutId/claim', authenticateToken, async (req, res) =>
   }
 });
 
-// Get user's claimed workouts
+// Get user's workouts (simplified - no claiming system)
+// Works with auth bypass by using device_uuid from user profile
 router.get('/workouts/claimed', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   
   try {
-    const { limit = 20, offset = 0 } = req.query;
+    const { limit = 200, offset = 0 } = req.query;
     const userId = req.user.id;
     
+    // Get user's device UUID - for auth bypass, use test device UUID
+    let deviceUuid;
+    if (userId === 'dev-user-123' || userId.includes('dev-')) {
+      // Auth bypass mode - use test device UUID
+      deviceUuid = process.env.TEST_DEVICE_UUID || 'f47ac10b-58cc-4372-a567-0e02b2c4c4a9';
+    } else {
+      // Real auth - get device UUID from user
+      const userResult = await client.query(
+        'SELECT device_uuid FROM users WHERE id = $1',
+        [userId]
+      );
+      if (userResult.rows.length === 0) {
+        return res.json({ workouts: [], pagination: { total: 0, limit: parseInt(limit), offset: parseInt(offset), hasMore: false } });
+      }
+      deviceUuid = userResult.rows[0].device_uuid;
+    }
+    
+    // Get workouts directly by device UUID (no claiming needed)
     const result = await client.query(`
       SELECT 
         w.id,
         w.workout_date,
+        w.workout_start_time,
         w.workout_duration_minutes,
         w.total_exercises,
         w.notes,
         w.created_at,
         af.original_filename,
-        wc.claimed_at,
-        wc.claim_method,
         u.device_uuid,
         COALESCE(
           json_agg(
@@ -477,30 +505,36 @@ router.get('/workouts/claimed', authenticateToken, async (req, res) => {
               'id', e.id,
               'exercise_name', e.exercise_name,
               'exercise_type', e.exercise_type,
+              'muscle_groups', e.muscle_groups,
               'sets', e.sets,
               'reps', e.reps,
               'weight_lbs', e.weight_lbs,
-              'effort_level', e.effort_level
+              'duration_minutes', e.duration_minutes,
+              'distance_miles', e.distance_miles,
+              'effort_level', e.effort_level,
+              'rest_seconds', e.rest_seconds,
+              'notes', e.notes,
+              'order_in_workout', e.order_in_workout
             ) ORDER BY e.order_in_workout
           ) FILTER (WHERE e.id IS NOT NULL), 
           '[]'
         ) as exercises
-      FROM workout_claims wc
-      JOIN workouts w ON wc.workout_id = w.id
+      FROM workouts w
       JOIN audio_files af ON w.audio_file_id = af.id
       JOIN users u ON w.user_id = u.id
       LEFT JOIN exercises e ON w.id = e.workout_id
-      WHERE wc.user_id = $1
-      GROUP BY w.id, w.workout_date, w.workout_duration_minutes, w.total_exercises, 
-               w.notes, w.created_at, af.original_filename, wc.claimed_at, 
-               wc.claim_method, u.device_uuid
-      ORDER BY wc.claimed_at DESC
+      WHERE u.device_uuid = $1
+      GROUP BY w.id, w.workout_date, w.workout_start_time, w.workout_duration_minutes, 
+               w.total_exercises, w.notes, w.created_at, af.original_filename, u.device_uuid
+      ORDER BY w.workout_date DESC, w.created_at DESC
       LIMIT $2 OFFSET $3
-    `, [userId, parseInt(limit), parseInt(offset)]);
+    `, [deviceUuid, parseInt(limit), parseInt(offset)]);
     
     const countResult = await client.query(
-      'SELECT COUNT(*) FROM workout_claims WHERE user_id = $1',
-      [userId]
+      `SELECT COUNT(*) FROM workouts w 
+       JOIN users u ON w.user_id = u.id 
+       WHERE u.device_uuid = $1`,
+      [deviceUuid]
     );
     
     res.json({
@@ -514,9 +548,63 @@ router.get('/workouts/claimed', authenticateToken, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Claimed workouts fetch error:', error);
+    console.error('Workouts fetch error:', error);
     res.status(500).json({ 
-      error: 'Failed to fetch claimed workouts',
+      error: 'Failed to fetch workouts',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Delete a workout
+router.delete('/workouts/:workoutId', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  
+  try {
+    const { workoutId } = req.params;
+    const userId = req.user.id;
+    
+    // Get user's device UUID for auth bypass
+    let deviceUuid;
+    if (userId === 'dev-user-123' || userId.includes('dev-')) {
+      deviceUuid = process.env.TEST_DEVICE_UUID || 'f47ac10b-58cc-4372-a567-0e02b2c4c4a9';
+    } else {
+      const userResult = await client.query(
+        'SELECT device_uuid FROM users WHERE id = $1',
+        [userId]
+      );
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      deviceUuid = userResult.rows[0].device_uuid;
+    }
+    
+    // Verify the workout belongs to this user's device
+    const workoutCheck = await client.query(`
+      SELECT w.id 
+      FROM workouts w
+      JOIN users u ON w.user_id = u.id
+      WHERE w.id = $1 AND u.device_uuid = $2
+    `, [workoutId, deviceUuid]);
+    
+    if (workoutCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Workout not found or access denied' });
+    }
+    
+    // Delete the workout (exercises will cascade delete automatically)
+    await client.query('DELETE FROM workouts WHERE id = $1', [workoutId]);
+    
+    res.json({
+      message: 'Workout deleted successfully',
+      workoutId
+    });
+    
+  } catch (error) {
+    console.error('Workout delete error:', error);
+    res.status(500).json({ 
+      error: 'Failed to delete workout',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   } finally {

@@ -70,11 +70,16 @@ spec:
               value: {{ include "morse.redis.port" . | quote }}
             - name: UPLOAD_DIR
               value: "/app/uploads"
-            - name: ANTHROPIC_API_KEY
+            - name: GOOGLE_GEMINI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "morse.fullname" . }}-secrets
-                  key: anthropic-api-key
+                  key: google-gemini-api-key
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "morse.fullname" . }}-secrets
+                  key: google-gemini-api-key
           volumeMounts:
             - name: uploads
               mountPath: /app/uploads
@@ -101,6 +106,7 @@ spec:
 
 ---
 # Worker Deployment
+{{- if .Values.worker.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -149,11 +155,16 @@ spec:
               value: {{ include "morse.redis.host" . }}
             - name: REDIS_PORT
               value: {{ include "morse.redis.port" . | quote }}
-            - name: ANTHROPIC_API_KEY
+            - name: GOOGLE_GEMINI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "morse.fullname" . }}-secrets
-                  key: anthropic-api-key
+                  key: google-gemini-api-key
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "morse.fullname" . }}-secrets
+                  key: google-gemini-api-key
             - name: WHISPER_MODEL
               value: {{ .Values.worker.env.WHISPER_MODEL }}
           volumeMounts:
@@ -180,6 +191,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- end }}
 
 ---
 # Frontend Deployment

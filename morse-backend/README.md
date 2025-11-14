@@ -12,7 +12,7 @@ I built this to track workouts by just talking to my phone. Record yourself sayi
 
 ## Running Locally
 
-You need Docker Desktop with Kubernetes, Helm, and an Anthropic API key.
+You need Docker Desktop with Kubernetes, Helm, and a Google Gemini API key.
 
 ```bash
 cd morse-backend
@@ -34,7 +34,7 @@ helm dependency update helm/
 
 # Deploy everything
 helm upgrade --install morse helm/ \
-  --set secrets.anthropicApiKey="$ANTHROPIC_API_KEY" \
+  --set secrets.googleGeminiApiKey="$GOOGLE_GEMINI_API_KEY" \
   --set image.repository="$DOCKER_REGISTRY" \
   --set image.tag="$IMAGE_TAG"
 

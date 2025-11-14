@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, Box, AppBar, Toolbar, Typography, Container, Button } from '@mui/material';
 import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
+import HistoryPage from './components/HistoryPage';
+import ExercisesPage from './components/ExercisesPage';
+import UploadTest from './components/UploadTest';
 import DeviceSearch from './components/DeviceSearch';
 import WorkoutClaiming from './components/WorkoutClaiming';
 import ClaimedWorkouts from './components/ClaimedWorkouts';
-import UploadTest from './components/UploadTest';
 import Teams from './components/Teams';
 import TeamView from './components/TeamView';
 import TeamJoin from './components/TeamJoin';
@@ -16,24 +18,112 @@ import DeviceLinking from './components/DeviceLinking';
 import WorkoutCalendar from './components/WorkoutCalendar';
 import api from './services/api';
 
+// TEMPORARY: Set to true to bypass authentication for UI development
+const BYPASS_AUTH = true;
+
+// Navigation Buttons Component
+const NavigationTabs = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  const isActive = (path) => {
+    const currentPath = location.pathname;
+    if (path === '/history' || path === '/') {
+      return currentPath === '/history' || currentPath === '/';
+    }
+    return currentPath === path || currentPath.startsWith(path);
+  };
+  
+  return (
+    <Box sx={{ 
+      display: 'flex', 
+      justifyContent: 'center', 
+      gap: 2,
+      py: 2,
+      borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
+      backgroundColor: '#ffffff'
+    }}>
+      <Button
+        variant={isActive('/history') ? 'contained' : 'outlined'}
+        onClick={() => navigate('/history')}
+        sx={{
+          minWidth: 200,
+          textTransform: 'none',
+          fontSize: '1rem',
+          fontWeight: 500,
+          backgroundColor: isActive('/history') ? '#1976d2' : 'transparent',
+          color: isActive('/history') ? '#ffffff' : '#1976d2',
+          borderColor: '#1976d2',
+          '&:hover': {
+            backgroundColor: isActive('/history') ? '#1565c0' : 'rgba(25, 118, 210, 0.04)',
+            borderColor: '#1565c0',
+          }
+        }}
+      >
+        History
+      </Button>
+      <Button
+        variant={isActive('/exercises') ? 'contained' : 'outlined'}
+        onClick={() => navigate('/exercises')}
+        sx={{
+          minWidth: 200,
+          textTransform: 'none',
+          fontSize: '1rem',
+          fontWeight: 500,
+          backgroundColor: isActive('/exercises') ? '#1976d2' : 'transparent',
+          color: isActive('/exercises') ? '#ffffff' : '#1976d2',
+          borderColor: '#1976d2',
+          '&:hover': {
+            backgroundColor: isActive('/exercises') ? '#1565c0' : 'rgba(25, 118, 210, 0.04)',
+            borderColor: '#1565c0',
+          }
+        }}
+      >
+        Exercises
+      </Button>
+      <Button
+        variant={isActive('/log-workout') ? 'contained' : 'outlined'}
+        onClick={() => navigate('/log-workout')}
+        sx={{
+          minWidth: 200,
+          textTransform: 'none',
+          fontSize: '1rem',
+          fontWeight: 500,
+          backgroundColor: isActive('/log-workout') ? '#1976d2' : 'transparent',
+          color: isActive('/log-workout') ? '#ffffff' : '#1976d2',
+          borderColor: '#1976d2',
+          '&:hover': {
+            backgroundColor: isActive('/log-workout') ? '#1565c0' : 'rgba(25, 118, 210, 0.04)',
+            borderColor: '#1565c0',
+          }
+        }}
+      >
+        Log New Workout
+      </Button>
+    </Box>
+  );
+};
+
 const theme = createTheme({
   palette: {
-    mode: 'dark',
+    mode: 'light',
     primary: {
-      main: '#00e5ff', // Bright cyan
+      main: '#1976d2', // Nice blue
+      light: '#42a5f5',
+      dark: '#1565c0',
     },
     secondary: {
-      main: '#ff6b6b', // Coral red
+      main: '#1976d2', // Use blue for secondary too
     },
     background: {
-      default: '#0a0a0a', // Pure black
-      paper: '#1a1a1a', // Dark gray
+      default: '#ffffff', // White
+      paper: '#ffffff', // White
     },
     text: {
-      primary: '#ffffff',
-      secondary: 'rgba(255, 255, 255, 0.7)',
+      primary: '#000000', // Black
+      secondary: 'rgba(0, 0, 0, 0.6)', // Dark gray
     },
-    divider: 'rgba(255, 255, 255, 0.12)',
+    divider: 'rgba(0, 0, 0, 0.12)',
   },
   typography: {
     fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
@@ -68,10 +158,10 @@ const theme = createTheme({
     MuiAppBar: {
       styleOverrides: {
         root: {
-          backgroundColor: '#1a1a1a',
-          backdropFilter: 'blur(20px)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-          boxShadow: '0 1px 20px rgba(0, 0, 0, 0.3)',
+          backgroundColor: '#ffffff',
+          color: '#000000',
+          borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.12)',
         },
       },
     },
@@ -79,8 +169,8 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          backgroundColor: '#1a1a1a',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+          backgroundColor: '#ffffff',
+          border: '1px solid rgba(0, 0, 0, 0.12)',
         },
       },
     },
@@ -91,9 +181,20 @@ const theme = createTheme({
           padding: '8px 24px',
         },
         contained: {
-          boxShadow: '0 4px 14px rgba(0, 229, 255, 0.25)',
+          backgroundColor: '#1976d2',
+          color: '#ffffff',
+          boxShadow: '0 2px 4px rgba(25, 118, 210, 0.2)',
           '&:hover': {
-            boxShadow: '0 6px 20px rgba(0, 229, 255, 0.35)',
+            backgroundColor: '#1565c0',
+            boxShadow: '0 4px 8px rgba(25, 118, 210, 0.3)',
+          },
+        },
+        outlined: {
+          borderColor: '#1976d2',
+          color: '#1976d2',
+          '&:hover': {
+            borderColor: '#1565c0',
+            backgroundColor: 'rgba(25, 118, 210, 0.04)',
           },
         },
       },
@@ -103,15 +204,15 @@ const theme = createTheme({
         root: {
           '& .MuiOutlinedInput-root': {
             borderRadius: 8,
-            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+            backgroundColor: '#ffffff',
             '& fieldset': {
-              borderColor: 'rgba(255, 255, 255, 0.2)',
+              borderColor: 'rgba(0, 0, 0, 0.23)',
             },
             '&:hover fieldset': {
-              borderColor: 'rgba(255, 255, 255, 0.3)',
+              borderColor: 'rgba(0, 0, 0, 0.4)',
             },
             '&.Mui-focused fieldset': {
-              borderColor: '#00e5ff',
+              borderColor: '#1976d2',
             },
           },
         },
@@ -121,9 +222,10 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          backgroundColor: '#1a1a1a',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+          backgroundColor: '#ffffff',
+          border: '1px solid rgba(0, 0, 0, 0.12)',
           borderRadius: 16,
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
         },
       },
     },
@@ -140,6 +242,20 @@ function App() {
     if (token) {
       loadUserProfile();
     } else {
+      // TEMPORARY: Bypass auth for UI development
+      if (BYPASS_AUTH) {
+        const mockUser = {
+          id: 'dev-user-123',
+          device_uuid: 'dev-uuid-123',
+          created_at: new Date().toISOString(),
+        };
+        setUser(mockUser);
+        setUserProfile({
+          user: mockUser
+        });
+        // Set a mock token for API calls
+        api.setAuthToken('dev-bypass-token');
+      }
       setLoading(false);
     }
   }, [token]);
@@ -241,13 +357,10 @@ function App() {
                   sx={{ 
                     flexGrow: 1,
                     fontWeight: 700,
-                    background: 'linear-gradient(135deg, #00e5ff 0%, #ff6b6b 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    color: 'transparent',
+                    color: '#1976d2',
                   }}
                 >
-                  MORSE
+                  morse
                 </Typography>
               </Toolbar>
             </AppBar>
@@ -289,34 +402,54 @@ function App() {
                 sx={{ 
                   flexGrow: 1,
                   fontWeight: 700,
-                  background: 'linear-gradient(135deg, #00e5ff 0%, #ff6b6b 100%)',
-                  backgroundClip: 'text',
-                  WebkitBackgroundClip: 'text',
-                  color: 'transparent',
+                  color: '#1976d2',
                 }}
               >
-                MORSE
+                morse
               </Typography>
               <Typography variant="body2" sx={{ mr: 2, opacity: 0.8 }}>
                 User ID: {user.id.slice(0, 8)}...
               </Typography>
-              <Button color="inherit" onClick={handleLogout}>
+              <Button 
+                variant="outlined" 
+                onClick={handleLogout}
+                sx={{ 
+                  borderColor: '#1976d2',
+                  color: '#1976d2',
+                  '&:hover': {
+                    borderColor: '#1565c0',
+                    backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                  },
+                }}
+              >
                 Logout
               </Button>
             </Toolbar>
           </AppBar>
+
+          <NavigationTabs />
 
           <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
             <Routes>
               <Route 
                 path="/" 
                 element={
-                  <Dashboard 
-                    user={user}
-                    userProfile={userProfile}
-                    onProfileUpdate={refreshProfile}
-                  />
+                  <HistoryPage user={user} />
                 } 
+              />
+              <Route 
+                path="/history" 
+                element={
+                  <HistoryPage user={user} />
+                } 
+              />
+              <Route 
+                path="/log-workout" 
+                element={<UploadTest />} 
+              />
+              <Route 
+                path="/exercises" 
+                element={<ExercisesPage />} 
               />
               <Route 
                 path="/search" 
