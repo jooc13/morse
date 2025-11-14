@@ -81,6 +81,11 @@ const apiService = {
     return response.data;
   },
 
+  async deleteWorkout(workoutId) {
+    const response = await api.delete(`/auth/workouts/${workoutId}`);
+    return response.data;
+  },
+
   // Legacy upload endpoint (for testing)
   async uploadAudio(file) {
     const formData = new FormData();
@@ -90,6 +95,23 @@ const apiService = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+    });
+    
+    return response.data;
+  },
+
+  async uploadAudioBatch(files) {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append('audio', file);
+    });
+    // Increase timeout for batch uploads - 15 files with 2s delays = ~30s + processing time
+    const timeout = Math.max(120000, files.length * 5000); // At least 2 minutes, or 5s per file
+    const response = await api.post('/upload/batch', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: timeout,
     });
     
     return response.data;

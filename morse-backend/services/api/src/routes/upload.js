@@ -4,6 +4,8 @@ const { Pool } = require('pg');
 const FileService = require('../services/FileService');
 const QueueService = require('../services/QueueService');
 const SessionService = require('../services/SessionService');
+const TranscriptionService = require('../services/TranscriptionService');
+const LLMService = require('../services/LLMService');
 
 const router = express.Router();
 const sessionService = new SessionService();
@@ -24,7 +26,23 @@ const upload = multer({
     if (FileService.validateFileType(file)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only MP3 files are allowed.'), false);
+      cb(new Error('Invalid file type. Only MP3, WAV, or M4A files are allowed.'), false);
+    }
+  }
+});
+
+// Batch upload for multiple files in one workout
+const batchUpload = multer({
+  storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB per file
+    files: 20 // Allow up to 20 files per batch
+  },
+  fileFilter: (req, file, cb) => {
+    if (FileService.validateFileType(file)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only MP3, WAV, or M4A files are allowed.'), false);
     }
   }
 });
@@ -128,32 +146,169 @@ router.post('/', upload.single('audio'), async (req, res) => {
       sessionDetectionResult = null;
     }
 
-    const queueResult = await QueueService.addTranscriptionJob({
-      audioFileId,
-      userId,
-      filePath,
-      originalFilename,
-      deviceUuid: deviceInfo.deviceUuid,
-      uploadTimestamp: deviceInfo.timestamp,
-      sessionId: sessionDetectionResult?.sessionId || null
-    });
-
-    if (queueResult.queued) {
+    // Process transcription and LLM extraction directly (instead of queuing)
+    let transcriptionResult = null;
+    let workoutResult = null;
+    let workoutDataResult = null;
+    
+    try {
+      // Update status to processing
       await client.query(
         'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
-        ['queued', audioFileId]
+        ['processing', audioFileId]
       );
+
+      // Step 1: Transcribe audio
+      console.log(`Transcribing audio file: ${audioFileId}`);
+      transcriptionResult = await TranscriptionService.transcribeAudio(filePath, audioFileId);
+      
+      if (!transcriptionResult.success) {
+        // If it's a retryable error (like quota), mark as pending for retry
+        if (transcriptionResult.retryable) {
+          await client.query(
+            'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+            ['pending', audioFileId]
+          );
+          console.log(`Transcription failed due to quota/rate limit. Marked for retry. Audio file: ${audioFileId}`);
+          // Exit try block - will send response with pending status
+        } else {
+          throw new Error(transcriptionResult.error || 'Transcription failed');
+        }
+      }
+
+      // Save transcription to database
+      const transcriptionInsert = await client.query(`
+        INSERT INTO transcriptions (
+          audio_file_id, raw_text, confidence_score, processing_time_ms
+        ) VALUES ($1, $2, $3, $4)
+        RETURNING id
+      `, [
+        audioFileId,
+        transcriptionResult.text,
+        transcriptionResult.confidence || 0.9,
+        transcriptionResult.processing_time_ms || 0
+      ]);
+      
+      const transcriptionId = transcriptionInsert.rows[0].id;
+      console.log(`Saved transcription ${transcriptionId}`);
+
+      // Only proceed with LLM if transcription succeeded
+      if (transcriptionResult.success) {
+        // Step 2: Extract workout data using LLM
+        console.log(`Extracting workout data from transcription`);
+        workoutDataResult = await LLMService.extractWorkoutData(
+          transcriptionResult.text,
+          deviceInfo.deviceUuid,
+          false,
+          1
+        );
+
+        if (!workoutDataResult.success) {
+          // If it's a retryable error (like quota), mark as pending for retry
+          if (workoutDataResult.retryable) {
+            await client.query(
+              'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+              ['pending', audioFileId]
+            );
+            console.log(`LLM extraction failed due to quota/rate limit. Marked for retry. Audio file: ${audioFileId}`);
+            // Exit try block - will send response with pending status
+          } else {
+            throw new Error(workoutDataResult.error || 'LLM extraction failed');
+          }
+        }
+      }
+
+      // Step 3: Save workout and exercises (only if both transcription and LLM succeeded)
+      if (transcriptionResult.success && workoutDataResult && workoutDataResult.success) {
+        const workoutDate = deviceInfo.timestampDate.toISOString().split('T')[0];
+        const workoutTime = deviceInfo.timestampDate.toTimeString().split(' ')[0].substring(0, 5);
+      
+      const workoutInsert = await client.query(`
+        INSERT INTO workouts (
+          user_id, audio_file_id, transcription_id, workout_date, 
+          workout_start_time, workout_duration_minutes, total_exercises, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id
+      `, [
+        userId,
+        audioFileId,
+        transcriptionId,
+        workoutDate,
+        workoutTime,
+        workoutDataResult.workout.workout_duration_minutes || null,
+        workoutDataResult.workout.exercises?.length || 0,
+        workoutDataResult.workout.notes || null
+      ]);
+
+      const workoutId = workoutInsert.rows[0].id;
+      console.log(`Saved workout ${workoutId}`);
+
+      // Save exercises
+      if (workoutDataResult.workout.exercises && workoutDataResult.workout.exercises.length > 0) {
+        for (const exercise of workoutDataResult.workout.exercises) {
+          await client.query(`
+            INSERT INTO exercises (
+              workout_id, exercise_name, exercise_type, muscle_groups,
+              sets, reps, weight_lbs, duration_minutes, distance_miles,
+              effort_level, rest_seconds, notes, order_in_workout
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          `, [
+            workoutId,
+            exercise.exercise_name,
+            exercise.exercise_type || 'strength',
+            exercise.muscle_groups || [],
+            exercise.sets || null,
+            exercise.reps || null,
+            exercise.weight_lbs || null,
+            exercise.duration_minutes || null,
+            exercise.distance_miles || null,
+            exercise.effort_level || null,
+            exercise.rest_seconds || null,
+            exercise.notes || null,
+            exercise.order_in_workout || null
+          ]);
+        }
+      }
+
+      // Update status to completed
+      await client.query(
+        'UPDATE audio_files SET transcription_status = $1, processed = $2 WHERE id = $3',
+        ['completed', true, audioFileId]
+      );
+
+        workoutResult = {
+          workoutId,
+          exerciseCount: workoutDataResult.workout.exercises?.length || 0
+        };
+
+        console.log(`Successfully processed audio file ${audioFileId} -> workout ${workoutId}`);
+      }
+    } catch (processingError) {
+      console.error('Processing error:', processingError);
+      await client.query(
+        'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+        ['failed', audioFileId]
+      );
+      // Don't fail the upload, just log the error
+      console.error('Failed to process transcription/LLM:', processingError.message);
     }
 
+    // Check if processing was skipped due to retryable errors
+    const processingStatus = workoutResult ? 'completed' : 
+                            (transcriptionResult?.retryable || workoutDataResult?.retryable) ? 'pending' : 'failed';
+    
     res.status(201).json({
       message: 'File uploaded successfully',
       audioFileId,
       filename: originalFilename,
       fileSize,
       uploadTimestamp,
-      queued: queueResult.queued,
-      jobId: queueResult.jobId,
+      processed: workoutResult !== null,
+      workoutId: workoutResult?.workoutId || null,
+      exerciseCount: workoutResult?.exerciseCount || 0,
       deviceUuid: deviceInfo.deviceUuid,
+      queued: false, // Processing happens directly, not queued
+      status: processingStatus,
       session: sessionDetectionResult ? {
         sessionId: sessionDetectionResult.sessionId,
         isNewSession: sessionDetectionResult.isNewSession,
@@ -171,6 +326,277 @@ router.post('/', upload.single('audio'), async (req, res) => {
     
     res.status(500).json({ 
       error: 'Failed to process upload',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Batch upload endpoint - processes multiple files as one workout
+router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
+  if (process.env.DISABLE_LEGACY_UPLOAD === 'true') {
+    return res.status(410).json({ 
+      error: 'Legacy upload endpoint disabled. Please use the new authentication system.',
+      redirect: '/login'
+    });
+  }
+
+  const client = await pool.connect();
+  
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No audio files provided' });
+    }
+
+    // Get device info from first file (all should be from same device/session)
+    const firstFile = req.files[0];
+    let deviceInfo;
+    
+    try {
+      deviceInfo = FileService.parseFilename(firstFile.originalname);
+    } catch (error) {
+      const testDeviceUuid = process.env.TEST_DEVICE_UUID || 'f47ac10b-58cc-4372-a567-0e02b2c4c4a9';
+      const now = new Date();
+      deviceInfo = {
+        deviceUuid: testDeviceUuid,
+        timestamp: now.getTime(),
+        timestampDate: now
+      };
+    }
+
+    await client.query('BEGIN');
+
+    // Find or create user
+    let user = await client.query(
+      'SELECT id FROM users WHERE device_uuid = $1',
+      [deviceInfo.deviceUuid]
+    );
+
+    if (user.rows.length === 0) {
+      const newUser = await client.query(
+        'INSERT INTO users (device_uuid, created_at) VALUES ($1, CURRENT_TIMESTAMP) RETURNING id',
+        [deviceInfo.deviceUuid]
+      );
+      user = newUser;
+    }
+
+    const userId = user.rows[0].id;
+
+    // Save all files and transcribe them
+    const audioFileIds = [];
+    const transcriptions = [];
+    
+    // Helper function to delay between API calls to respect rate limits
+    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      
+      if (!FileService.validateFileSize(file)) {
+        throw new Error(`File ${file.originalname} exceeds 50MB limit`);
+      }
+
+      const { filePath, fileSize } = await FileService.saveFile(file, file.originalname);
+      
+      const audioFile = await client.query(`
+        INSERT INTO audio_files (
+          user_id, original_filename, file_path, file_size, 
+          upload_timestamp, transcription_status
+        ) VALUES ($1, $2, $3, $4, $5, 'processing') 
+        RETURNING id
+      `, [userId, file.originalname, filePath, fileSize, deviceInfo.timestampDate]);
+
+      const audioFileId = audioFile.rows[0].id;
+      audioFileIds.push(audioFileId);
+
+      // Add delay between transcription calls to respect rate limits (except for first file)
+      if (i > 0) {
+        await delay(2000); // 2 second delay between calls
+      }
+
+      // Transcribe each file
+      try {
+        const transcriptionResult = await TranscriptionService.transcribeAudio(filePath, audioFileId);
+        if (transcriptionResult.success) {
+          transcriptions.push(transcriptionResult.text);
+          
+          // Save transcription
+          await client.query(`
+            INSERT INTO transcriptions (
+              audio_file_id, raw_text, confidence_score, processing_time_ms
+            ) VALUES ($1, $2, $3, $4)
+          `, [
+            audioFileId,
+            transcriptionResult.text,
+            transcriptionResult.confidence || 0.9,
+            transcriptionResult.processing_time_ms || 0
+          ]);
+        } else if (transcriptionResult.retryable) {
+          // Quota/rate limit error - mark for retry
+          await client.query(
+            'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+            ['pending', audioFileId]
+          );
+          console.log(`Transcription quota/rate limit error for ${audioFileId}, marked for retry`);
+        } else {
+          // Non-retryable error
+          await client.query(
+            'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+            ['failed', audioFileId]
+          );
+          console.error(`Transcription failed for ${audioFileId}:`, transcriptionResult.error);
+        }
+      } catch (transcriptionError) {
+        console.error(`Transcription error for ${audioFileId}:`, transcriptionError);
+        await client.query(
+          'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+          ['failed', audioFileId]
+        );
+      }
+    }
+
+    // Combine all transcriptions and extract workout data as one workout
+    // Format: clearly label each recording so LLM can extract all exercises
+    const combinedTranscription = transcriptions.map((text, index) => {
+      return `[Recording ${index + 1} of ${transcriptions.length}]\n${text}`;
+    }).join('\n\n---\n\n');
+    
+    if (combinedTranscription.trim().length === 0) {
+      // Check if we have any pending files (quota errors)
+      const pendingFiles = audioFileIds.filter(id => {
+        // We'll check status after this
+        return true;
+      });
+      
+      // Mark all files as pending if we have no transcriptions
+      await client.query(
+        `UPDATE audio_files SET transcription_status = $1 WHERE id = ANY($2)`,
+        ['pending', audioFileIds]
+      );
+      
+      await client.query('COMMIT');
+      
+      return res.status(201).json({
+        message: 'Files uploaded but processing pending due to quota limits',
+        fileCount: req.files.length,
+        audioFileIds,
+        deviceUuid: deviceInfo.deviceUuid,
+        processed: false,
+        queued: false,
+        status: 'pending'
+      });
+    }
+
+    console.log(`Batch upload: Combining ${transcriptions.length} transcriptions (${combinedTranscription.length} chars)`);
+
+    // Extract workout data from combined transcription
+    const workoutDataResult = await LLMService.extractWorkoutData(
+      combinedTranscription,
+      deviceInfo.deviceUuid,
+      true, // isSession = true for batch uploads
+      req.files.length // recordingCount
+    );
+    
+    console.log(`Batch upload: Extracted ${workoutDataResult.workout?.exercises?.length || 0} exercises`);
+
+    if (!workoutDataResult.success) {
+      if (workoutDataResult.retryable) {
+        // Quota error - mark all files as pending for retry
+        await client.query(
+          `UPDATE audio_files SET transcription_status = $1 WHERE id = ANY($2)`,
+          ['pending', audioFileIds]
+        );
+        
+        await client.query('COMMIT');
+        
+        return res.status(201).json({
+          message: 'Files uploaded but processing pending due to quota limits',
+          fileCount: req.files.length,
+          audioFileIds,
+          deviceUuid: deviceInfo.deviceUuid,
+          processed: false,
+          queued: false,
+          status: 'pending'
+        });
+      }
+      throw new Error(workoutDataResult.error || 'LLM extraction failed');
+    }
+
+    // Create one workout for all files
+    const workoutDate = deviceInfo.timestampDate.toISOString().split('T')[0];
+    const workoutTime = deviceInfo.timestampDate.toTimeString().split(' ')[0].substring(0, 5);
+    
+    const workoutInsert = await client.query(`
+      INSERT INTO workouts (
+        user_id, audio_file_id, transcription_id, workout_date, 
+        workout_start_time, workout_duration_minutes, total_exercises, notes
+      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+      RETURNING id
+    `, [
+      userId,
+      audioFileIds[0], // Use first audio file as primary
+      workoutDate,
+      workoutTime,
+      workoutDataResult.workout.workout_duration_minutes || null,
+      workoutDataResult.workout.exercises?.length || 0,
+      workoutDataResult.workout.notes || null
+    ]);
+
+    const workoutId = workoutInsert.rows[0].id;
+
+    // Save exercises
+    if (workoutDataResult.workout.exercises && workoutDataResult.workout.exercises.length > 0) {
+      for (const exercise of workoutDataResult.workout.exercises) {
+        await client.query(`
+          INSERT INTO exercises (
+            workout_id, exercise_name, exercise_type, muscle_groups,
+            sets, reps, weight_lbs, duration_minutes, distance_miles,
+            effort_level, rest_seconds, notes, order_in_workout
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        `, [
+          workoutId,
+          exercise.exercise_name,
+          exercise.exercise_type || 'strength',
+          exercise.muscle_groups || [],
+          exercise.sets || null,
+          exercise.reps || null,
+          exercise.weight_lbs || null,
+          exercise.duration_minutes || null,
+          exercise.distance_miles || null,
+          exercise.effort_level || null,
+          exercise.rest_seconds || null,
+          exercise.notes || null,
+          exercise.order_in_workout || null
+        ]);
+      }
+    }
+
+    // Update all audio files to completed
+    await client.query(
+      `UPDATE audio_files SET transcription_status = $1, processed = $2 WHERE id = ANY($3)`,
+      ['completed', true, audioFileIds]
+    );
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      message: 'Batch upload processed successfully',
+      workoutId,
+      exerciseCount: workoutDataResult.workout.exercises?.length || 0,
+      fileCount: req.files.length,
+      audioFileIds,
+      deviceUuid: deviceInfo.deviceUuid,
+      processed: true,
+      queued: false,
+      status: 'completed'
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Batch upload error:', error);
+    res.status(500).json({ 
+      error: 'Failed to process batch upload',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   } finally {

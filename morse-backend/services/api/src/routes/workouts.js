@@ -458,8 +458,9 @@ router.get('/:deviceUuid/llm-summary', async (req, res) => {
     const { deviceUuid } = req.params;
     const { days = 365 } = req.query; // Use 1 year default to capture data
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(400).json({ error: 'LLM service not configured' });
+    const geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
+      return res.status(400).json({ error: 'LLM service not configured (GOOGLE_GEMINI_API_KEY required)' });
     }
 
     const client = await pool.connect();
@@ -547,7 +548,7 @@ router.get('/:deviceUuid/llm-summary', async (req, res) => {
     // Add muscle groups to summary
     summary.muscle_groups = muscleGroupQuery.rows.map(row => row.muscle_group);
 
-    // Prepare data for Claude
+    // Prepare data for Gemini
     const promptData = {
       summary: summary,
       recent_workouts: recentWorkouts.rows,
@@ -555,18 +556,13 @@ router.get('/:deviceUuid/llm-summary', async (req, res) => {
       period_days: parseInt(days)
     };
 
-    // Try to call Claude API, but provide fallback if it fails
+    // Try to call Gemini API, but provide fallback if it fails
     let summaryText = '';
     
     try {
-      console.log('Calling Claude API for workout summary...');
-      const claudeResponse = await axios.post('https://api.anthropic.com/v1/messages', {
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 800,
-        temperature: 0.7,
-        messages: [{
-          role: 'user',
-          content: `As a fitness expert AI, analyze this user's workout data and provide personalized insights and recommendations. Be encouraging, specific, and actionable.
+      console.log('Calling Gemini API for workout summary...');
+      const model = 'gemini-2.0-flash-exp';
+      const prompt = `As a fitness expert AI, analyze this user's workout data and provide personalized insights and recommendations. Be encouraging, specific, and actionable.
 
 User's Workout Data (last ${parseInt(days)} days):
 ${JSON.stringify(promptData, null, 2)}
@@ -578,21 +574,34 @@ Please provide:
 4. **Recommendations**: 2-3 specific, actionable suggestions
 5. **Motivation**: Encouraging message about their progress
 
-Format your response as a friendly, conversational summary that feels personal and motivating. Keep it concise but insightful.`
-        }]
-      }, {
-        headers: {
-          'Authorization': `Bearer ${process.env.ANTHROPIC_API_KEY}`,
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01'
+Format your response as a friendly, conversational summary that feels personal and motivating. Keep it concise but insightful.`;
+
+      const geminiResponse = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
+        {
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 800,
+          }
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          timeout: 30000
         }
-      });
+      );
       
-      summaryText = claudeResponse.data.content[0].text;
-      console.log('Claude API call successful');
+      summaryText = geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      console.log('Gemini API call successful');
       
-    } catch (claudeError) {
-      console.error('Claude API failed:', claudeError.response?.status, claudeError.response?.data);
+    } catch (geminiError) {
+      console.error('Gemini API failed:', geminiError.response?.status, geminiError.response?.data);
       
       // Provide a fallback summary based on the data
       summaryText = `**Workout Summary (${parseInt(days)} days)**

@@ -1,8 +1,8 @@
 import React from 'react';
-import SimpleWorkoutDashboard from './SimpleWorkoutDashboard';
+import HistoryPage from './HistoryPage';
 
 const Dashboard = ({ user, userProfile, onProfileUpdate }) => {
-  return <SimpleWorkoutDashboard user={user} />;
+  return <HistoryPage user={user} />;
 };
 
 export default Dashboard;
