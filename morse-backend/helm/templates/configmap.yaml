@@ -9,8 +9,10 @@ data:
   API_NODE_ENV: {{ .Values.api.env.NODE_ENV | quote }}
   API_PORT: {{ .Values.api.env.PORT | quote }}
   
+  {{- if .Values.worker.enabled }}
   # Worker Configuration
   WHISPER_MODEL: {{ .Values.worker.env.WHISPER_MODEL | quote }}
+  {{- end }}
   
   # Redis Configuration
   REDIS_HOST: {{ include "morse.redis.host" . | quote }}

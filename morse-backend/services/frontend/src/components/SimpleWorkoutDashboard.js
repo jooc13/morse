@@ -235,7 +235,7 @@ const SimpleWorkoutDashboard = ({ user }) => {
           </Button>
         </Box>
       ) : (
-        <TableContainer component={Paper} sx={{ backgroundColor: 'rgba(255,255,255,0.02)' }}>
+        <TableContainer component={Paper} sx={{ backgroundColor: '#ffffff' }}>
           <Table>
             <TableHead>
               <TableRow>

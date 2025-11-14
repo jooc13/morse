@@ -49,11 +49,10 @@ function Login({ onLogin }) {
         p: 6, 
         maxWidth: 440, 
         mx: 'auto',
-        background: 'linear-gradient(135deg, rgba(26, 26, 26, 0.9) 0%, rgba(26, 26, 26, 0.95) 100%)',
-        backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(0, 229, 255, 0.2)',
+        backgroundColor: '#ffffff',
+        border: '1px solid rgba(0, 0, 0, 0.12)',
         borderRadius: 3,
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
       }}
     >
       <Box component="form" onSubmit={handleSubmit}>
@@ -62,10 +61,7 @@ function Login({ onLogin }) {
             variant="h4" 
             component="h1" 
             sx={{ 
-              background: 'linear-gradient(135deg, #00e5ff 0%, #ff6b6b 100%)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              color: 'transparent',
+              color: '#1976d2',
               fontWeight: 800,
               mb: 1
             }}
@@ -117,9 +113,10 @@ function Login({ onLogin }) {
             mt: 4, 
             mb: 3,
             py: 1.5,
-            background: 'linear-gradient(135deg, #00e5ff 0%, #0288d1 100%)',
+            backgroundColor: '#1976d2',
+            color: '#ffffff',
             '&:hover': {
-              background: 'linear-gradient(135deg, #00b8cc 0%, #0277bd 100%)',
+              backgroundColor: '#1565c0',
             },
             fontWeight: 600,
             fontSize: '1.1rem',
@@ -136,12 +133,12 @@ function Login({ onLogin }) {
               component={RouterLink} 
               to="/register" 
               sx={{ 
-                color: '#00e5ff',
+                color: '#1976d2',
                 textDecoration: 'none',
                 fontWeight: 600,
                 '&:hover': {
                   textDecoration: 'underline',
-                  color: '#00b8cc',
+                  color: '#1565c0',
                 }
               }}
             >

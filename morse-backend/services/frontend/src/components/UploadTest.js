@@ -12,7 +12,8 @@ import {
   Divider,
   TextField,
   FormControlLabel,
-  Switch
+  Switch,
+  Stack
 } from '@mui/material';
 import {
   CloudUpload,
@@ -26,11 +27,11 @@ import api from '../services/api';
 
 const UploadTest = () => {
   const navigate = useNavigate();
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadResults, setUploadResults] = useState([]);
   const [error, setError] = useState(null);
-  const [jobStatus, setJobStatus] = useState(null);
+  const [jobStatuses, setJobStatuses] = useState({});
   const [useCustomUuid, setUseCustomUuid] = useState(false);
   const [customUuid, setCustomUuid] = useState('');
 
@@ -38,65 +39,123 @@ const UploadTest = () => {
   const testUuid = 'f47ac10b-58cc-4372-a567-0e02b2c4c4a9';
 
   const handleFileSelect = (event) => {
-    const selectedFile = event.target.files[0];
-    if (selectedFile) {
-      if (selectedFile.type !== 'audio/mpeg' && !selectedFile.name.toLowerCase().endsWith('.mp3')) {
-        setError('Please select an MP3 file');
+    const selectedFiles = Array.from(event.target.files || []);
+    if (selectedFiles.length === 0) return;
+
+    const validExtensions = ['.mp3', '.wav', '.m4a'];
+    const validMimeTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/aac'];
+    
+    const validFiles = [];
+    const errors = [];
+
+    selectedFiles.forEach((file, index) => {
+      const fileName = file.name.toLowerCase();
+      
+      // Accept if it has a valid extension OR valid MIME type OR starts with audio/
+      const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
+      const hasValidMimeType = validMimeTypes.includes(file.type);
+      const isAudioType = file.type && file.type.startsWith('audio/');
+      
+      if (!hasValidExtension && !hasValidMimeType && !isAudioType) {
+        errors.push(`${file.name}: Invalid file type. Please select MP3, WAV, or M4A files.`);
         return;
       }
-      if (selectedFile.size > 50 * 1024 * 1024) {
-        setError('File size must be under 50MB');
+      if (file.size > 50 * 1024 * 1024) {
+        errors.push(`${file.name}: File size must be under 50MB`);
         return;
       }
-      setFile(selectedFile);
+      validFiles.push(file);
+    });
+
+    if (errors.length > 0) {
+      setError(errors.join('\n'));
+    } else {
+      setFiles(validFiles);
       setError(null);
-      setUploadResult(null);
-      setJobStatus(null);
+      setUploadResults([]);
+      setJobStatuses({});
     }
   };
 
-  const generateDeviceFilename = (originalFile) => {
+  const generateDeviceFilename = (originalFile, index = 0) => {
     const deviceUuid = useCustomUuid && customUuid ? customUuid : testUuid;
-    const timestamp = Date.now();
-    const extension = originalFile.name.toLowerCase().endsWith('.mp3') ? '.mp3' : '.mp3';
+    // Add small delay between timestamps to ensure uniqueness
+    const timestamp = Date.now() + index;
+    const fileName = originalFile.name.toLowerCase();
+    let extension = '.mp3'; // default
+    if (fileName.endsWith('.m4a')) {
+      extension = '.m4a';
+    } else if (fileName.endsWith('.wav')) {
+      extension = '.wav';
+    } else if (fileName.endsWith('.mp3')) {
+      extension = '.mp3';
+    }
     return `${deviceUuid}_${timestamp}${extension}`;
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (files.length === 0) return;
 
     setUploading(true);
     setError(null);
-    setUploadResult(null);
+    setUploadResults([]);
+    setJobStatuses({});
 
     try {
-      // Create a new file with the proper device filename format
-      const deviceFilename = generateDeviceFilename(file);
-      const renamedFile = new File([file], deviceFilename, { type: file.type });
-      
-      const result = await api.uploadAudio(renamedFile);
-      setUploadResult(result);
-      
-      // Start polling for job status if queued
-      if (result.queued && result.jobId) {
-        pollJobStatus(result.jobId);
+      // If multiple files, use batch upload (creates one workout)
+      // If single file, use regular upload
+      if (files.length > 1) {
+        // Batch upload: all files = one workout
+        const renamedFiles = files.map((file, i) => {
+          const deviceFilename = generateDeviceFilename(file, i);
+          return new File([file], deviceFilename, { type: file.type });
+        });
+        
+        const result = await api.uploadAudioBatch(renamedFiles);
+        
+        // Create result entries for each file showing they're part of one workout
+        const batchResults = files.map((file, index) => ({
+          file: file.name,
+          result: {
+            ...result,
+            audioFileId: result.audioFileIds?.[index] || `batch-${index}`,
+            filename: file.name,
+            isBatch: true,
+            fileCount: files.length
+          }
+        }));
+        
+        setUploadResults(batchResults);
+      } else {
+        // Single file upload
+        const file = files[0];
+        const deviceFilename = generateDeviceFilename(file, 0);
+        const renamedFile = new File([file], deviceFilename, { type: file.type });
+        
+        const result = await api.uploadAudio(renamedFile);
+        setUploadResults([{ file: file.name, result }]);
+        
+        // Start polling for job status if queued
+        if (result.queued && result.jobId) {
+          pollJobStatus(result.jobId, file.name);
+        }
       }
     } catch (err) {
-      console.error('Upload failed:', err);
+      console.error('Upload error:', err);
       setError(err.response?.data?.error || 'Upload failed');
     } finally {
       setUploading(false);
     }
   };
 
-  const pollJobStatus = async (jobId) => {
+  const pollJobStatus = async (jobId, fileName) => {
     try {
       const status = await api.getUploadStatus(jobId);
-      setJobStatus(status);
+      setJobStatuses(prev => ({ ...prev, [fileName]: status }));
       
       // Continue polling if still processing
       if (status.status === 'pending' || status.status === 'processing') {
-        setTimeout(() => pollJobStatus(jobId), 2000);
+        setTimeout(() => pollJobStatus(jobId, fileName), 2000);
       }
     } catch (err) {
       console.error('Status check failed:', err);
@@ -150,7 +209,7 @@ const UploadTest = () => {
             Device Configuration
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Configure the device UUID for testing. Files will be uploaded with format: deviceUuid_timestamp.mp3
+            Configure the device UUID for testing. Files will be uploaded with format: deviceUuid_timestamp.mp3|wav|m4a
           </Typography>
           
           <Card variant="outlined" sx={{ mb: 2, p: 2 }}>
@@ -189,17 +248,18 @@ const UploadTest = () => {
 
         <Box sx={{ mb: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Select MP3 File
+            Select Audio Files
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Choose an MP3 file (max 50MB) for transcription and workout extraction.
+            Choose one or more MP3, WAV, or M4A files (max 50MB each) for transcription and workout extraction.
           </Typography>
           
           <input
-            accept="audio/mpeg,.mp3"
+            accept="audio/*,.mp3,.wav,.m4a"
             style={{ display: 'none' }}
             id="file-upload"
             type="file"
+            multiple
             onChange={handleFileSelect}
           />
           <label htmlFor="file-upload">
@@ -210,22 +270,29 @@ const UploadTest = () => {
               size="large"
               sx={{ mr: 2 }}
             >
-              Choose File
+              Choose Files
             </Button>
           </label>
           
-          {file && (
+          {files.length > 0 && (
             <Box sx={{ mt: 2 }}>
-              <Card variant="outlined">
-                <CardContent sx={{ py: 2 }}>
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                    {file.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {formatFileSize(file.size)}
-                  </Typography>
-                </CardContent>
-              </Card>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {files.length} {files.length === 1 ? 'file' : 'files'} selected
+              </Typography>
+              <Stack spacing={1}>
+                {files.map((file, index) => (
+                  <Card key={index} variant="outlined">
+                    <CardContent sx={{ py: 1.5 }}>
+                      <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                        {file.name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {formatFileSize(file.size)}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
             </Box>
           )}
         </Box>
@@ -241,11 +308,11 @@ const UploadTest = () => {
             variant="contained"
             size="large"
             onClick={handleUpload}
-            disabled={!file || uploading}
+            disabled={files.length === 0 || uploading}
             startIcon={uploading ? null : <CloudUpload />}
             sx={{ minWidth: 150 }}
           >
-            {uploading ? 'Uploading...' : 'Upload File'}
+            {uploading ? `Uploading ${files.length} file${files.length === 1 ? '' : 's'}...` : `Upload ${files.length || ''} File${files.length === 1 ? '' : 's'}`}
           </Button>
           
           {uploading && (
@@ -258,98 +325,117 @@ const UploadTest = () => {
           )}
         </Box>
 
-        {uploadResult && (
+        {uploadResults.length > 0 && (
           <Box sx={{ mt: 3 }}>
             <Divider sx={{ mb: 2 }} />
             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <CheckCircle color="success" />
-              Upload Successful
+              Upload Results ({uploadResults.length} {uploadResults.length === 1 ? 'file' : 'files'})
             </Typography>
             
-            <Card variant="outlined" sx={{ mb: 2 }}>
-              <CardContent>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Upload Details
-                </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-                  <Chip label={`File ID: ${uploadResult.audioFileId}`} size="small" />
-                  <Chip label={`Device: ${uploadResult.deviceUuid}`} size="small" />
-                  <Chip label={`Filename: ${uploadResult.filename}`} size="small" />
-                  <Chip 
-                    label={uploadResult.queued ? 'Queued for Processing' : 'Not Queued'} 
-                    color={uploadResult.queued ? 'success' : 'default'}
-                    size="small" 
-                  />
-                </Box>
-                
-                {uploadResult.session && (
-                  <Box>
-                    <Typography variant="body2" color="text.secondary" gutterBottom>
-                      Session Information
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                      <Chip 
-                        label={`Session ID: ${uploadResult.session.sessionId}`} 
-                        size="small" 
-                      />
-                      <Chip 
-                        label={uploadResult.session.isNewSession ? 'New Session' : 'Existing Session'} 
-                        color={uploadResult.session.isNewSession ? 'primary' : 'default'}
-                        size="small" 
-                      />
-                      {uploadResult.session.timeGapMinutes > 0 && (
+            <Stack spacing={2}>
+              {uploadResults.map((uploadItem, index) => {
+                const result = uploadItem.result;
+                const status = jobStatuses[uploadItem.file];
+                return (
+                  <Card key={index} variant="outlined">
+                    <CardContent>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                        {uploadItem.file}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Upload Details
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                        <Chip label={`File ID: ${result.audioFileId}`} size="small" />
+                        <Chip label={`Device: ${result.deviceUuid}`} size="small" />
+                        <Chip label={`Filename: ${result.filename}`} size="small" />
                         <Chip 
-                          label={`Gap: ${uploadResult.session.timeGapMinutes}min`} 
+                          label={
+                            result.processed ? 'Workout Created' : 
+                            result.status === 'pending' ? 'Pending Retry' : 
+                            result.status === 'completed' ? 'Completed' : 
+                            result.status === 'failed' ? 'Failed' :
+                            result.queued ? 'Queued' :
+                            'Processing...'
+                          } 
+                          color={
+                            result.processed ? 'success' : 
+                            result.status === 'pending' ? 'warning' : 
+                            result.status === 'completed' ? 'success' : 
+                            result.status === 'failed' ? 'error' :
+                            result.queued ? 'info' :
+                            'info'
+                          }
                           size="small" 
                         />
+                        {result.workoutId && (
+                          <Chip 
+                            label={`Workout ID: ${result.workoutId.slice(0, 8)}...`} 
+                            color="primary"
+                            size="small" 
+                          />
+                        )}
+                        {result.exerciseCount > 0 && (
+                          <Chip 
+                            label={`${result.exerciseCount} exercise${result.exerciseCount === 1 ? '' : 's'}`} 
+                            color="success"
+                            size="small" 
+                          />
+                        )}
+                      </Box>
+                      
+                      {result.session && (
+                        <Box sx={{ mb: 2 }}>
+                          <Typography variant="body2" color="text.secondary" gutterBottom>
+                            Session Information
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                            <Chip 
+                              label={`Session ID: ${result.session.sessionId}`} 
+                              size="small" 
+                            />
+                            <Chip 
+                              label={result.session.isNewSession ? 'New Session' : 'Existing Session'} 
+                              color={result.session.isNewSession ? 'primary' : 'default'}
+                              size="small" 
+                            />
+                            {result.session.timeGapMinutes > 0 && (
+                              <Chip 
+                                label={`Gap: ${result.session.timeGapMinutes}min`} 
+                                size="small" 
+                              />
+                            )}
+                          </Box>
+                        </Box>
                       )}
-                    </Box>
-                  </Box>
-                )}
-              </CardContent>
-            </Card>
 
-            {jobStatus && (
-              <Card variant="outlined">
-                <CardContent>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Processing Status
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                    {jobStatus.status === 'completed' && <CheckCircle color="success" />}
-                    {jobStatus.status === 'failed' && <Error color="error" />}
-                    {(jobStatus.status === 'pending' || jobStatus.status === 'processing') && <Info color="info" />}
-                    <Chip 
-                      label={jobStatus.status || 'Unknown'} 
-                      color={getStatusColor(jobStatus.status)}
-                      size="small" 
-                    />
-                  </Box>
-                  
-                  {jobStatus.status === 'processing' && (
-                    <LinearProgress sx={{ mt: 1 }} />
-                  )}
-                  
-                  {jobStatus.result && (
-                    <Box sx={{ mt: 2 }}>
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        Processing Result
-                      </Typography>
-                      <Typography variant="body2" component="pre" sx={{ 
-                        backgroundColor: 'rgba(0,0,0,0.1)', 
-                        p: 1, 
-                        borderRadius: 1,
-                        fontSize: '0.75rem',
-                        overflow: 'auto',
-                        maxHeight: 200
-                      }}>
-                        {JSON.stringify(jobStatus.result, null, 2)}
-                      </Typography>
-                    </Box>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                      {status && (
+                        <Box>
+                          <Typography variant="body2" color="text.secondary" gutterBottom>
+                            Processing Status
+                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                            {status.status === 'completed' && <CheckCircle color="success" />}
+                            {status.status === 'failed' && <Error color="error" />}
+                            {(status.status === 'pending' || status.status === 'processing') && <Info color="info" />}
+                            <Chip 
+                              label={status.status || 'Unknown'} 
+                              color={getStatusColor(status.status)}
+                              size="small" 
+                            />
+                          </Box>
+                          
+                          {status.status === 'processing' && (
+                            <LinearProgress sx={{ mt: 1 }} />
+                          )}
+                        </Box>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </Stack>
           </Box>
         )}
       </Paper>

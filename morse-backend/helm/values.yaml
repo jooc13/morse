@@ -27,8 +27,8 @@ api:
       cpu: 500m
       memory: 512Mi
     requests:
-      cpu: 250m
-      memory: 256Mi
+      cpu: 100m
+      memory: 128Mi
   env:
     NODE_ENV: development
     PORT: 3000
@@ -38,7 +38,8 @@ api:
 
 # Worker Service Configuration
 worker:
-  replicaCount: 1
+  enabled: false
+  replicaCount: 0
   image:
     repository: cpenny49/morse-worker
     tag: "amd64"
@@ -70,8 +71,8 @@ frontend:
       cpu: 200m
       memory: 256Mi
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 50m
+      memory: 64Mi
   autoscaling:
     enabled: false
 
@@ -133,8 +134,8 @@ postgresql:
         cpu: 1000m
         memory: 1Gi
       requests:
-        cpu: 500m
-        memory: 512Mi
+        cpu: 200m
+        memory: 256Mi
     initdb:
       configMap: morse-db-init
       scriptsConfigMap: morse-db-init
@@ -153,8 +154,8 @@ redis:
         cpu: 200m
         memory: 256Mi
       requests:
-        cpu: 100m
-        memory: 128Mi
+        cpu: 50m
+        memory: 64Mi
 
 # Environment Variables
 env:
@@ -167,7 +168,8 @@ env:
   
 # Secrets
 secrets:
-  anthropicApiKey: "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"
+  anthropicApiKey: ""  # Deprecated - no longer used
+  googleGeminiApiKey: "AIzaSyAAk95Op3UTzgKy0zshZVW-s_rBX5S7nIM"  # Add your Gemini API key here
 
 # Node Selector
 nodeSelector: {}
