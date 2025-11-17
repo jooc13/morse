@@ -38,17 +38,17 @@ api:
 
 # Worker Service Configuration
 worker:
-  replicaCount: 1
+  replicaCount: 0
   image:
     repository: cpenny49/morse-worker
     tag: "amd64"
   resources:
     limits:
-      cpu: 2000m
-      memory: 4Gi
+      cpu: 100m
+      memory: 1Gi
     requests:
-      cpu: 1000m
-      memory: 2Gi
+      cpu: 100m
+      memory: 1Gi
   env:
     WHISPER_MODEL: base
   autoscaling:
@@ -161,7 +161,7 @@ env:
   # These will be set via secrets in production
   anthropicApiKey: ""
   # Test data configuration - controls whether test UUIDs and workouts are created
-  populateTestData: true  # Set to false to disable test data population
+  populateTestData: true  # Set to false to disabFdle test data population
   # UI configuration
   showUploadTest: true  # Set to false to hide upload test button in production
   
