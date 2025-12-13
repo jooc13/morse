@@ -489,11 +489,10 @@ router.get('/workouts/claimed', authenticateToken, async (req, res) => {
     
     // Get workouts directly by device UUID (no claiming needed)
     const result = await client.query(`
-      SELECT 
+      SELECT
         w.id,
-        w.workout_date,
-        w.workout_start_time,
-        w.workout_duration_minutes,
+        w.date_completed as workout_date,
+        w.duration_seconds,
         w.total_exercises,
         w.notes,
         w.created_at,
@@ -503,30 +502,26 @@ router.get('/workouts/claimed', authenticateToken, async (req, res) => {
           json_agg(
             json_build_object(
               'id', e.id,
-              'exercise_name', e.exercise_name,
-              'exercise_type', e.exercise_type,
-              'muscle_groups', e.muscle_groups,
+              'exercise_name', e.name,
+              'exercise_type', e.category,
               'sets', e.sets,
               'reps', e.reps,
-              'weight_lbs', e.weight_lbs,
-              'duration_minutes', e.duration_minutes,
-              'distance_miles', e.distance_miles,
-              'effort_level', e.effort_level,
-              'rest_seconds', e.rest_seconds,
-              'notes', e.notes,
-              'order_in_workout', e.order_in_workout
-            ) ORDER BY e.order_in_workout
-          ) FILTER (WHERE e.id IS NOT NULL), 
+              'weight', e.weight,
+              'duration_seconds', e.duration_seconds,
+              'distance', e.distance,
+              'notes', e.notes
+            )
+          ) FILTER (WHERE e.id IS NOT NULL),
           '[]'
         ) as exercises
       FROM workouts w
-      JOIN audio_files af ON w.audio_file_id = af.id
+      LEFT JOIN audio_files af ON w.audio_file_id = af.id
       JOIN users u ON w.user_id = u.id
       LEFT JOIN exercises e ON w.id = e.workout_id
       WHERE u.device_uuid = $1
-      GROUP BY w.id, w.workout_date, w.workout_start_time, w.workout_duration_minutes, 
+      GROUP BY w.id, w.date_completed, w.duration_seconds,
                w.total_exercises, w.notes, w.created_at, af.original_filename, u.device_uuid
-      ORDER BY w.workout_date DESC, w.created_at DESC
+      ORDER BY w.date_completed DESC, w.created_at DESC
       LIMIT $2 OFFSET $3
     `, [deviceUuid, parseInt(limit), parseInt(offset)]);
     
