@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS transcriptions (
 CREATE TABLE IF NOT EXISTS workouts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    session_id UUID REFERENCES sessions(id) ON DELETE NULL,
+    session_id UUID REFERENCES sessions(id) ON DELETE SET NULL,
     audio_file_id UUID REFERENCES audio_files(id) ON DELETE SET NULL,
     device_uuid VARCHAR(255) NOT NULL,
     title VARCHAR(500),
