@@ -48,8 +48,8 @@ services:
     # Auto-scaling (upgrade to paid plan)
     # minInstances: 1
     # maxInstances: 3
-    # Auto-deploy from main branch
-    branch: main
+    # Auto-deploy from integration-656-vibecode branch
+    branch: integration-656-vibecode
 
   # Frontend Service (React + Express proxy)
   - type: web
@@ -73,7 +73,7 @@ services:
     startCommand: node server.js
     plan: starter  # $7/month
     numInstances: 1
-    branch: main
+    branch: integration-656-vibecode
 
   # Redis Service - Managed Redis for job queues
   - type: redis
