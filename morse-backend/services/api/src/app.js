@@ -4,7 +4,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
-require('dotenv').config();
+require('dotenv').config({ path: '../../.env' });
 
 // Import database initialization
 const { initializeDatabase } = require('./utils/database-init');
@@ -18,6 +18,9 @@ const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust proxy for production (Render uses reverse proxy)
+app.set('trust proxy', 1);
 
 app.use(helmet());
 app.use(compression());
