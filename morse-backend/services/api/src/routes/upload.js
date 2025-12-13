@@ -361,7 +361,8 @@ router.post('/', upload.single('audio'), async (req, res) => {
     const processingStatus = workoutResult ? 'completed' : 
                             (transcriptionResult?.retryable || workoutDataResult?.retryable) ? 'uploaded' : 'failed';
     
-    res.status(201).json({
+    // Build response
+    const response = {
       message: 'File uploaded successfully',
       audioFileId,
       filename: originalFilename,
@@ -378,7 +379,19 @@ router.post('/', upload.single('audio'), async (req, res) => {
         isNewSession: sessionDetectionResult.isNewSession,
         timeGapMinutes: Math.round(sessionDetectionResult.timeGapMinutes || 0)
       } : null
-    });
+    };
+
+    // Add quota error info if applicable
+    if (transcriptionResult?.retryable && transcriptionResult?.error) {
+      response.transcriptionError = transcriptionResult.error;
+      response.retryAfter = transcriptionResult.retryAfter || 3600;
+    }
+    if (workoutDataResult?.retryable && workoutDataResult?.error) {
+      response.llmError = workoutDataResult.error;
+      response.retryAfter = workoutDataResult.retryAfter || 3600;
+    }
+
+    res.status(201).json(response);
 
   } catch (error) {
     await client.query('ROLLBACK');
