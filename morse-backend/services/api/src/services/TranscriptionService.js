@@ -289,9 +289,9 @@ class TranscriptionService {
       if (isQuotaError) {
         return {
           success: false,
-          error: errorMessage,
+          error: "API quota exceeded. The transcription service has reached its limit. Please try again later or contact support.",
           retryable: true,
-          retryAfter: error.response?.data?.error?.retryAfter || 60 // Default 60 seconds
+          retryAfter: error.response?.data?.error?.retryAfter || 3600 // Default 1 hour
         };
       }
       
