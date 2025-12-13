@@ -1,13 +1,12 @@
-const axios = require('axios');
-const path = require('path');
+const OpenAI = require('openai');
 const fs = require('fs').promises;
 
 class TranscriptionService {
   constructor() {
-    this.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-    this.geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    // Default to gemini since we have the API key
-    this.provider = process.env.TRANSCRIPTION_PROVIDER || 'gemini'; // anthropic, gemini, openai, assemblyai, etc.
+    this.openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+    this.provider = process.env.TRANSCRIPTION_PROVIDER || 'openai';
   }
 
   /**
@@ -15,12 +14,10 @@ class TranscriptionService {
    */
   async transcribeAudio(filePath, audioFileId, deviceUuid = null, userId = null, audioBuffer = null) {
     try {
-      if (this.provider === 'worker') {
+      if (this.provider === 'openai') {
+        return await this.transcribeWithWhisper(filePath, audioFileId, audioBuffer);
+      } else if (this.provider === 'worker') {
         return await this.transcribeWithWorker(filePath, audioFileId, deviceUuid, userId, audioBuffer);
-      } else if (this.provider === 'anthropic') {
-        return await this.transcribeWithAnthropic(filePath, audioFileId, audioBuffer);
-      } else if (this.provider === 'gemini') {
-        return await this.transcribeWithGemini(filePath, audioFileId, '', audioBuffer);
       } else {
         throw new Error(`Unsupported transcription provider: ${this.provider}`);
       }
@@ -31,44 +28,127 @@ class TranscriptionService {
   }
 
   /**
-   * Transcribe using worker service (Whisper)
+   * Transcribe using OpenAI Whisper API
+   */
+  async transcribeWithWhisper(filePath, audioFileId, audioBuffer = null) {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY environment variable is required');
+    }
+
+    try {
+      let audioFile;
+      let tempFilePath = null;
+
+      // Handle in-memory buffer
+      if (filePath.startsWith('memory://') && audioBuffer) {
+        // Create a temporary file for OpenAI API
+        tempFilePath = `/tmp/temp-audio-${audioFileId}.mp3`;
+        await fs.writeFile(tempFilePath, audioBuffer);
+        audioFile = fs.createReadStream(tempFilePath);
+      } else if (Buffer.isBuffer(audioBuffer)) {
+        // Direct buffer input
+        tempFilePath = `/tmp/temp-audio-${audioFileId}.mp3`;
+        await fs.writeFile(tempFilePath, audioBuffer);
+        audioFile = fs.createReadStream(tempFilePath);
+      } else {
+        // Regular file path
+        audioFile = fs.createReadStream(filePath);
+      }
+
+      console.log(`Starting Whisper transcription for audio file: ${audioFileId}`);
+
+      const transcription = await this.openai.audio.transcriptions.create({
+        file: audioFile,
+        model: 'whisper-1',
+        language: 'en', // Optional: specify language for better accuracy
+        response_format: 'text',
+        temperature: 0.0, // Lower temperature for more deterministic output
+      });
+
+      // Clean up temporary file if created
+      if (tempFilePath) {
+        try {
+          await fs.unlink(tempFilePath);
+        } catch (error) {
+          console.warn('Failed to delete temp file:', tempFilePath, error.message);
+        }
+      }
+
+      if (!transcription || transcription.trim().length === 0) {
+        throw new Error('No transcription text returned from OpenAI Whisper');
+      }
+
+      return {
+        success: true,
+        text: transcription.trim(),
+        confidence: 0.95, // Whisper doesn't provide confidence, but it's generally accurate
+        processing_time_ms: 0, // Could track this if needed
+        language: 'en',
+        provider: 'openai'
+      };
+    } catch (error) {
+      // Clean up temporary file on error
+      if (tempFilePath) {
+        try {
+          await fs.unlink(tempFilePath);
+        } catch (cleanupError) {
+          console.warn('Failed to delete temp file during cleanup:', tempFilePath, cleanupError.message);
+        }
+      }
+
+      console.error('OpenAI Whisper transcription error:', error.message);
+
+      // Check if it's a quota or rate limit error
+      const errorMessage = error.message || '';
+      const isQuotaError = errorMessage.includes('quota') ||
+                          errorMessage.includes('rate limit') ||
+                          errorMessage.includes('insufficient_quota') ||
+                          error.status === 429 ||
+                          error.status === 402;
+
+      if (isQuotaError) {
+        return {
+          success: false,
+          error: "API quota exceeded. The transcription service has reached its limit. Please try again later or contact support.",
+          retryable: true,
+          retryAfter: 3600 // Default 1 hour for quota errors
+        };
+      }
+
+      throw new Error(`OpenAI Whisper transcription failed: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Transcribe using worker service (Whisper) - fallback option
    */
   async transcribeWithWorker(filePath, audioFileId, deviceUuid, userId, audioBuffer = null) {
     try {
       // For in-memory files, we can't use the worker since it expects files on disk
-      // Fall back to direct transcription with Anthropic or Gemini
+      // Fall back to direct transcription with OpenAI
       if (filePath.startsWith('memory://')) {
-        console.log('In-memory file detected, falling back to direct transcription (worker not supported)');
-        // Prefer Anthropic, fall back to Gemini if not available
-        if (this.anthropicApiKey) {
-          return await this.transcribeWithAnthropic(filePath, audioFileId, audioBuffer);
-        } else if (this.geminiApiKey) {
-          return await this.transcribeWithGemini(filePath, audioFileId, '', audioBuffer);
-        } else {
-          throw new Error('No API keys available for transcription fallback');
-        }
+        console.log('In-memory file detected, falling back to direct OpenAI transcription');
+        return await this.transcribeWithWhisper(filePath, audioFileId, audioBuffer);
       }
 
       // Queue the audio file for transcription by the worker
       const queueService = require('../services/QueueService');
 
-      // Add job to transcription queue
       const jobData = {
         type: 'transcription',
         audioFileId: audioFileId,
-        filePath: filePath, // This will be the host path, mounted at /app/uploads in container
+        filePath: filePath,
         timestamp: new Date().toISOString(),
-        userId: userId || 'anonymous', // Use provided userId or default
-        deviceUuid: deviceUuid || 'test-device', // Use provided deviceUuid or default
-        sessionId: null, // No session context for pure transcription
-        fileName: path.basename(filePath)
+        userId: userId || 'anonymous',
+        deviceUuid: deviceUuid || 'test-device',
+        sessionId: null,
+        fileName: require('path').basename(filePath)
       };
 
       const result = await queueService.addTranscriptionJob(jobData);
 
       console.log(`Audio file ${audioFileId} queued for worker transcription`);
 
-      // Return a placeholder response - the actual transcription will be processed asynchronously
       return {
         success: true,
         text: null, // Will be filled by worker
@@ -87,227 +167,12 @@ class TranscriptionService {
   }
 
   /**
-   * Transcribe using Anthropic Claude API
-   */
-  async transcribeWithAnthropic(filePath, audioFileId, audioBuffer = null) {
-    if (!this.anthropicApiKey) {
-      throw new Error('ANTHROPIC_API_KEY environment variable is required');
-    }
-
-    try {
-      // Read the audio file (handle both in-memory and disk files)
-      let audioData;
-      if (filePath.startsWith('memory://') && audioBuffer) {
-        // File is in memory
-        audioData = audioBuffer;
-      } else {
-        // File is on disk
-        audioData = await fs.readFile(filePath);
-      }
-      const audioBase64 = audioData.toString('base64');
-
-      // Determine MIME type from file extension
-      const ext = path.extname(filePath).toLowerCase();
-      let mimeType = 'audio/mpeg';
-      if (ext === '.m4a') {
-        mimeType = 'audio/mp4';
-      } else if (ext === '.wav') {
-        mimeType = 'audio/wav';
-      } else if (ext === '.mp3') {
-        mimeType = 'audio/mpeg';
-      }
-
-      // Call Anthropic Claude API for transcription
-      const response = await axios.post(
-        'https://api.anthropic.com/v1/messages',
-        {
-          model: 'claude-3-5-sonnet-20241022',
-          max_tokens: 4096,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: 'Transcribe this audio recording of someone describing their workout. Extract the spoken text verbatim. Return only the transcription text, no additional commentary or formatting.'
-                },
-                {
-                  type: 'image',
-                  source: {
-                    type: 'base64',
-                    media_type: mimeType,
-                    data: audioBase64
-                  }
-                }
-              ]
-            }
-          ]
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': this.anthropicApiKey,
-            'anthropic-version': '2023-06-01'
-          },
-          timeout: 180000 // 3 minute timeout for audio processing
-        }
-      );
-
-      const transcriptionText = response.data?.content?.[0]?.text || '';
-
-      if (!transcriptionText) {
-        throw new Error('No transcription text returned from Anthropic API');
-      }
-
-      return {
-        success: true,
-        text: transcriptionText.trim(),
-        confidence: 0.95, // Claude typically provides high quality transcriptions
-        processing_time_ms: 0, // Could track this if needed
-        language: 'en',
-        provider: 'anthropic'
-      };
-    } catch (error) {
-      console.error('Anthropic transcription error:', error.response?.data || error.message);
-      const errorMessage = error.response?.data?.error?.message || error.message;
-
-      // Check if it's a quota error - these should be retried later
-      const isQuotaError = errorMessage.includes('quota') ||
-                          errorMessage.includes('rate limit') ||
-                          errorMessage.includes('credit') ||
-                          error.response?.status === 429;
-
-      if (isQuotaError) {
-        return {
-          success: false,
-          error: errorMessage,
-          retryable: true,
-          retryAfter: error.response?.data?.error?.retryAfter || 120 // Default 2 minutes
-        };
-      }
-
-      throw new Error(`Anthropic transcription failed: ${errorMessage}`);
-    }
-  }
-
-  /**
-   * Transcribe using Google Gemini Pro API
-   */
-  async transcribeWithGemini(filePathOrBuffer, audioFileId, fileName = '', audioBuffer = null) {
-    if (!this.geminiApiKey) {
-      throw new Error('GOOGLE_GEMINI_API_KEY or GEMINI_API_KEY environment variable is required');
-    }
-
-    try {
-      // Handle both file path and buffer
-      let audioData;
-      let mimeType = 'audio/mpeg';
-
-      if (Buffer.isBuffer(filePathOrBuffer)) {
-        audioData = filePathOrBuffer;
-        // Determine MIME type from filename if provided
-        if (fileName) {
-          const ext = path.extname(fileName).toLowerCase();
-          if (ext === '.m4a') mimeType = 'audio/mp4';
-          else if (ext === '.wav') mimeType = 'audio/wav';
-        }
-      } else if (typeof filePathOrBuffer === 'string' && filePathOrBuffer.startsWith('memory://') && audioBuffer) {
-        // File is in memory
-        audioData = audioBuffer;
-        // Determine MIME type from filename if provided
-        if (fileName) {
-          const ext = path.extname(fileName).toLowerCase();
-          if (ext === '.m4a') mimeType = 'audio/mp4';
-          else if (ext === '.wav') mimeType = 'audio/wav';
-        }
-      } else {
-        // For backward compatibility, read from file path
-        const fs = require('fs').promises;
-        audioData = await fs.readFile(filePathOrBuffer);
-        const ext = path.extname(filePathOrBuffer).toLowerCase();
-        if (ext === '.m4a') mimeType = 'audio/mp4';
-        else if (ext === '.wav') mimeType = 'audio/wav';
-      }
-
-      const audioBase64 = audioData.toString('base64');
-
-      // Call Gemini API for transcription
-      // Using gemini-2.0-flash-exp or gemini-1.5-pro for audio support
-      const model = 'gemini-2.0-flash-exp'; // or 'gemini-1.5-pro' if 2.0 not available
-      const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiApiKey}`,
-        {
-          contents: [{
-            parts: [
-              {
-                text: "Transcribe this audio recording of someone describing their workout. Extract the spoken text verbatim. Return only the transcription text, no additional commentary or formatting."
-              },
-              {
-                inline_data: {
-                  mime_type: mimeType,
-                  data: audioBase64
-                }
-              }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0.0,
-            maxOutputTokens: 8192,
-          }
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          timeout: 120000 // 120 second timeout for audio processing
-        }
-      );
-
-      const transcriptionText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      
-      if (!transcriptionText) {
-        throw new Error('No transcription text returned from Gemini API');
-      }
-
-      return {
-        success: true,
-        text: transcriptionText.trim(),
-        confidence: 0.9, // Gemini doesn't provide confidence scores
-        processing_time_ms: 0, // Could track this if needed
-        language: 'en',
-        provider: 'gemini'
-      };
-    } catch (error) {
-      console.error('Gemini transcription error:', error.response?.data || error.message);
-      const errorMessage = error.response?.data?.error?.message || error.message;
-      
-      // Check if it's a quota error - these should be retried later
-      const isQuotaError = errorMessage.includes('quota') || 
-                          errorMessage.includes('rate limit') ||
-                          error.response?.status === 429;
-      
-      if (isQuotaError) {
-        return {
-          success: false,
-          error: "API quota exceeded. The transcription service has reached its limit. Please try again later or contact support.",
-          retryable: true,
-          retryAfter: error.response?.data?.error?.retryAfter || 3600 // Default 1 hour
-        };
-      }
-      
-      throw new Error(`Gemini transcription failed: ${errorMessage}`);
-    }
-  }
-
-  /**
    * Get audio duration (helper method)
    */
   async getAudioDuration(filePath) {
     // This is a placeholder - you might want to use a library like 'node-ffprobe' or 'ffmpeg-static'
-    // For now, return 0 and let the database handle it
     return 0;
   }
 }
 
 module.exports = new TranscriptionService();
-
