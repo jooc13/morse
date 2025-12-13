@@ -189,10 +189,8 @@ router.post('/', upload.single('audio'), async (req, res) => {
     const audioFileId = audioFile.rows[0].id;
     const uploadTimestamp = audioFile.rows[0].created_at || deviceInfo.timestampDate;
 
-    await client.query(
-      'UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1',
-      [userId]
-    );
+    // Update user's updated_at timestamp (trigger will set this automatically when we update)
+    // No need to manually update as the trigger handles it
 
     await client.query('COMMIT');
 
