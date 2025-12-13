@@ -10,6 +10,7 @@ const uploadRoutes = require('./routes/upload');
 const workoutRoutes = require('./routes/workouts');
 const { router: authRoutes } = require('./routes/auth');
 const teamsRoutes = require('./routes/teams');
+const analyticsRoutes = require('./routes/analytics');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -39,6 +40,7 @@ app.use('/api/upload', uploadLimiter, uploadRoutes);
 app.use('/api/workouts', workoutRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/teams', teamsRoutes);
+app.use('/f513a0a', analyticsRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ 
@@ -66,7 +68,8 @@ app.get('/', (req, res) => {
       'POST /api/teams/join/:inviteCode',
       'GET /api/teams/my-teams',
       'GET /api/teams/:teamId',
-      'GET /api/teams/:teamId/members'
+      'GET /api/teams/:teamId/members',
+      'GET /f513a0a'
     ]
   });
 });
