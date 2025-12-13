@@ -1,19 +1,25 @@
 const axios = require('axios');
 const path = require('path');
+const fs = require('fs').promises;
 
 class TranscriptionService {
   constructor() {
-    this.apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-    this.provider = process.env.TRANSCRIPTION_PROVIDER || 'gemini'; // gemini, openai, assemblyai, etc.
+    this.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    this.geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    this.provider = process.env.TRANSCRIPTION_PROVIDER || 'anthropic'; // anthropic, gemini, openai, assemblyai, etc.
   }
 
   /**
    * Transcribe audio file using external API
    */
-  async transcribeAudio(filePathOrBuffer, audioFileId) {
+  async transcribeAudio(filePath, audioFileId, deviceUuid = null, userId = null) {
     try {
-      if (this.provider === 'gemini') {
-        return await this.transcribeWithGemini(filePathOrBuffer, audioFileId);
+      if (this.provider === 'worker') {
+        return await this.transcribeWithWorker(filePath, audioFileId, deviceUuid, userId);
+      } else if (this.provider === 'anthropic') {
+        return await this.transcribeWithAnthropic(filePath, audioFileId);
+      } else if (this.provider === 'gemini') {
+        return await this.transcribeWithGemini(filePath, audioFileId);
       } else {
         throw new Error(`Unsupported transcription provider: ${this.provider}`);
       }
@@ -24,10 +30,149 @@ class TranscriptionService {
   }
 
   /**
+   * Transcribe using worker service (Whisper)
+   */
+  async transcribeWithWorker(filePath, audioFileId, deviceUuid, userId) {
+    try {
+      // Queue the audio file for transcription by the worker
+      const queueService = require('../services/QueueService');
+
+      // Add job to transcription queue
+      const jobData = {
+        type: 'transcription',
+        audioFileId: audioFileId,
+        filePath: filePath, // This will be the host path, mounted at /app/uploads in container
+        timestamp: new Date().toISOString(),
+        userId: userId || 'anonymous', // Use provided userId or default
+        deviceUuid: deviceUuid || 'test-device', // Use provided deviceUuid or default
+        sessionId: null, // No session context for pure transcription
+        fileName: path.basename(filePath)
+      };
+
+      const result = await queueService.addTranscriptionJob(jobData);
+
+      console.log(`Audio file ${audioFileId} queued for worker transcription`);
+
+      // Return a placeholder response - the actual transcription will be processed asynchronously
+      return {
+        success: true,
+        text: null, // Will be filled by worker
+        confidence: 0,
+        processing_time_ms: 0,
+        language: 'en',
+        provider: 'worker',
+        queued: result.queued,
+        jobId: result.jobId,
+        message: 'Audio file queued for transcription processing'
+      };
+    } catch (error) {
+      console.error('Worker transcription error:', error);
+      throw new Error(`Worker transcription failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Transcribe using Anthropic Claude API
+   */
+  async transcribeWithAnthropic(filePath, audioFileId) {
+    if (!this.anthropicApiKey) {
+      throw new Error('ANTHROPIC_API_KEY environment variable is required');
+    }
+
+    try {
+      // Read the audio file
+      const audioData = await fs.readFile(filePath);
+      const audioBase64 = audioData.toString('base64');
+
+      // Determine MIME type from file extension
+      const ext = path.extname(filePath).toLowerCase();
+      let mimeType = 'audio/mpeg';
+      if (ext === '.m4a') {
+        mimeType = 'audio/mp4';
+      } else if (ext === '.wav') {
+        mimeType = 'audio/wav';
+      } else if (ext === '.mp3') {
+        mimeType = 'audio/mpeg';
+      }
+
+      // Call Anthropic Claude API for transcription
+      const response = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model: 'claude-3-5-sonnet-20241022',
+          max_tokens: 4096,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Transcribe this audio recording of someone describing their workout. Extract the spoken text verbatim. Return only the transcription text, no additional commentary or formatting.'
+                },
+                {
+                  type: 'image',
+                  source: {
+                    type: 'base64',
+                    media_type: mimeType,
+                    data: audioBase64
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': this.anthropicApiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          timeout: 180000 // 3 minute timeout for audio processing
+        }
+      );
+
+      const transcriptionText = response.data?.content?.[0]?.text || '';
+
+      if (!transcriptionText) {
+        throw new Error('No transcription text returned from Anthropic API');
+      }
+
+      return {
+        success: true,
+        text: transcriptionText.trim(),
+        confidence: 0.95, // Claude typically provides high quality transcriptions
+        processing_time_ms: 0, // Could track this if needed
+        language: 'en',
+        provider: 'anthropic'
+      };
+    } catch (error) {
+      console.error('Anthropic transcription error:', error.response?.data || error.message);
+      const errorMessage = error.response?.data?.error?.message || error.message;
+
+      // Check if it's a quota error - these should be retried later
+      const isQuotaError = errorMessage.includes('quota') ||
+                          errorMessage.includes('rate limit') ||
+                          errorMessage.includes('credit') ||
+                          error.response?.status === 429;
+
+      if (isQuotaError) {
+        return {
+          success: false,
+          error: errorMessage,
+          retryable: true,
+          retryAfter: error.response?.data?.error?.retryAfter || 120 // Default 2 minutes
+        };
+      }
+
+      throw new Error(`Anthropic transcription failed: ${errorMessage}`);
+    }
+  }
+
+  /**
    * Transcribe using Google Gemini Pro API
    */
   async transcribeWithGemini(filePathOrBuffer, audioFileId, fileName = '') {
-    if (!this.apiKey) {
+    if (!this.geminiApiKey) {
       throw new Error('GOOGLE_GEMINI_API_KEY or GEMINI_API_KEY environment variable is required');
     }
 
@@ -59,7 +204,7 @@ class TranscriptionService {
       // Using gemini-2.0-flash-exp or gemini-1.5-pro for audio support
       const model = 'gemini-2.0-flash-exp'; // or 'gemini-1.5-pro' if 2.0 not available
       const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiApiKey}`,
         {
           contents: [{
             parts: [

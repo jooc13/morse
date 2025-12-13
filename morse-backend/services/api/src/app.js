@@ -4,7 +4,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
-require('dotenv').config();
+require('dotenv').config({ path: '../../.env' });
 
 const uploadRoutes = require('./routes/upload');
 const workoutRoutes = require('./routes/workouts');
