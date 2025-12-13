@@ -23,7 +23,8 @@
     "morgan": "^1.10.0",
     "axios": "^1.4.0",
     "bcrypt": "^5.1.0",
-    "jsonwebtoken": "^9.0.0"
+    "jsonwebtoken": "^9.0.0",
+    "@anthropic-ai/sdk": "^0.20.0"
   },
   "devDependencies": {
     "nodemon": "^2.0.22",

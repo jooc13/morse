@@ -1,0 +1,110 @@
+services:
+  # Database services using standard images
+  postgres:
+    image: postgres:15-alpine
+    container_name: morse-postgres
+    environment:
+      - POSTGRES_USER=morse_user
+      - POSTGRES_PASSWORD=morse_password
+      - POSTGRES_DB=morse_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - morse-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U morse_user -d morse_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: morse-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - morse-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Your application services using cpenny49 registry
+  api:
+    image: cpenny49/morse-api:amd64
+    container_name: morse-api
+    platform: linux/amd64
+    environment:
+      - DATABASE_URL=postgresql://morse_user:morse_password@postgres:5432/morse_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-your-jwt-secret-here}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+      - NODE_ENV=production
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - morse-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  worker:
+    image: cpenny49/morse-worker:amd64
+    container_name: morse-worker
+    platform: linux/amd64
+    environment:
+      - DATABASE_URL=postgresql://morse_user:morse_password@postgres:5432/morse_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+    volumes:
+      - ./services/api/uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - morse-network
+
+  frontend:
+    image: cpenny49/morse-frontend:amd64
+    container_name: morse-frontend
+    platform: linux/amd64
+    environment:
+      - REACT_APP_API_URL=http://localhost:3000/api
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - morse-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  morse-network:
+    driver: bridge

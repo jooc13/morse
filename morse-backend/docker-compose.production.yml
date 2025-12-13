@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # Database services using Bitnami images
+  postgres:
+    image: bitnami/postgresql:latest
+    container_name: morse-postgres
+    environment:
+      - POSTGRESQL_USERNAME=morse_user
+      - POSTGRESQL_PASSWORD=morse_password
+      - POSTGRESQL_DATABASE=morse_db
+      - POSTGRESQL_POSTGRES_PASSWORD=postgres_admin_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/bitnami/postgresql/data
+    networks:
+      - morse-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U morse_user -d morse_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: bitnami/redis:latest
+    container_name: morse-redis
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/bitnami/redis/data
+    networks:
+      - morse-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Your application services using cpenny49 registry
+  api:
+    image: cpenny49/morse-api:amd64
+    container_name: morse-api
+    environment:
+      - DATABASE_URL=postgresql://morse_user:morse_password@postgres:5432/morse_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-your-jwt-secret-here}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+      - NODE_ENV=production
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - morse-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  worker:
+    image: cpenny49/morse-worker:amd64
+    container_name: morse-worker
+    environment:
+      - DATABASE_URL=postgresql://morse_user:morse_password@postgres:5432/morse_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - morse-network
+
+  frontend:
+    image: cpenny49/morse-frontend:amd64
+    container_name: morse-frontend
+    environment:
+      - REACT_APP_API_URL=https://morse-api-28mo.onrender.com
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - morse-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  morse-network:
+    driver: bridge
