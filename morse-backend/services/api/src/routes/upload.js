@@ -181,10 +181,10 @@ router.post('/', upload.single('audio'), async (req, res) => {
     const audioFile = await client.query(`
       INSERT INTO audio_files (
         user_id, original_filename, file_path, file_size,
-        transcription_status
-      ) VALUES ($1, $2, $3, $4, 'pending')
+        device_uuid, status
+      ) VALUES ($1, $2, $3, $4, $5, 'uploaded')
       RETURNING id, created_at
-    `, [userId, originalFilename, filePath, fileSize]);
+    `, [userId, originalFilename, filePath, fileSize, deviceInfo.deviceUuid]);
 
     const audioFileId = audioFile.rows[0].id;
     const uploadTimestamp = audioFile.rows[0].created_at || deviceInfo.timestampDate;
@@ -219,7 +219,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
     try {
       // Update status to processing
       await client.query(
-        'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+        'UPDATE audio_files SET status = $1 WHERE id = $2',
         ['processing', audioFileId]
       );
 
@@ -231,8 +231,8 @@ router.post('/', upload.single('audio'), async (req, res) => {
         // If it's a retryable error (like quota), mark as pending for retry
         if (transcriptionResult.retryable) {
           await client.query(
-            'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
-            ['pending', audioFileId]
+            'UPDATE audio_files SET status = $1 WHERE id = $2',
+            ['uploaded', audioFileId]
           );
           console.log(`Transcription failed due to quota/rate limit. Marked for retry. Audio file: ${audioFileId}`);
           // Exit try block - will send response with pending status
@@ -273,8 +273,8 @@ router.post('/', upload.single('audio'), async (req, res) => {
           // If it's a retryable error (like quota), mark as pending for retry
           if (workoutDataResult.retryable) {
             await client.query(
-              'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
-              ['pending', audioFileId]
+              'UPDATE audio_files SET status = $1 WHERE id = $2',
+              ['uploaded', audioFileId]
             );
             console.log(`LLM extraction failed due to quota/rate limit. Marked for retry. Audio file: ${audioFileId}`);
             // Exit try block - will send response with pending status
@@ -338,7 +338,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
 
       // Update status to completed
       await client.query(
-        'UPDATE audio_files SET transcription_status = $1, processed = $2 WHERE id = $3',
+        'UPDATE audio_files SET status = $1, processed = $2 WHERE id = $3',
         ['completed', true, audioFileId]
       );
 
@@ -352,7 +352,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
     } catch (processingError) {
       console.error('Processing error:', processingError);
       await client.query(
-        'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+        'UPDATE audio_files SET status = $1 WHERE id = $2',
         ['failed', audioFileId]
       );
       // Don't fail the upload, just log the error
@@ -361,7 +361,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
 
     // Check if processing was skipped due to retryable errors
     const processingStatus = workoutResult ? 'completed' : 
-                            (transcriptionResult?.retryable || workoutDataResult?.retryable) ? 'pending' : 'failed';
+                            (transcriptionResult?.retryable || workoutDataResult?.retryable) ? 'uploaded' : 'failed';
     
     res.status(201).json({
       message: 'File uploaded successfully',
@@ -471,7 +471,7 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
       const audioFile = await client.query(`
         INSERT INTO audio_files (
           user_id, original_filename, file_path, file_size,
-          transcription_status
+          status
         ) VALUES ($1, $2, $3, $4, 'processing')
         RETURNING id
       `, [userId, file.originalname, filePath, fileSize]);
@@ -504,14 +504,14 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
         } else if (transcriptionResult.retryable) {
           // Quota/rate limit error - mark for retry
           await client.query(
-            'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
-            ['pending', audioFileId]
+            'UPDATE audio_files SET status = $1 WHERE id = $2',
+            ['uploaded', audioFileId]
           );
           console.log(`Transcription quota/rate limit error for ${audioFileId}, marked for retry`);
         } else {
           // Non-retryable error
           await client.query(
-            'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+            'UPDATE audio_files SET status = $1 WHERE id = $2',
             ['failed', audioFileId]
           );
           console.error(`Transcription failed for ${audioFileId}:`, transcriptionResult.error);
@@ -519,7 +519,7 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
       } catch (transcriptionError) {
         console.error(`Transcription error for ${audioFileId}:`, transcriptionError);
         await client.query(
-          'UPDATE audio_files SET transcription_status = $1 WHERE id = $2',
+          'UPDATE audio_files SET status = $1 WHERE id = $2',
           ['failed', audioFileId]
         );
       }
@@ -540,8 +540,8 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
       
       // Mark all files as pending if we have no transcriptions
       await client.query(
-        `UPDATE audio_files SET transcription_status = $1 WHERE id = ANY($2)`,
-        ['pending', audioFileIds]
+        `UPDATE audio_files SET status = $1 WHERE id = ANY($2)`,
+        ['uploaded', audioFileIds]
       );
       
       await client.query('COMMIT');
@@ -553,7 +553,7 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
         deviceUuid: deviceInfo.deviceUuid,
         processed: false,
         queued: false,
-        status: 'pending'
+        status: 'uploaded'
       });
     }
 
@@ -574,8 +574,8 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
       if (workoutDataResult.retryable) {
         // Quota error - mark all files as pending for retry
         await client.query(
-          `UPDATE audio_files SET transcription_status = $1 WHERE id = ANY($2)`,
-          ['pending', audioFileIds]
+          `UPDATE audio_files SET status = $1 WHERE id = ANY($2)`,
+          ['uploaded', audioFileIds]
         );
         
         await client.query('COMMIT');
@@ -587,7 +587,7 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
           deviceUuid: deviceInfo.deviceUuid,
           processed: false,
           queued: false,
-          status: 'pending'
+          status: 'uploaded'
         });
       }
       throw new Error(workoutDataResult.error || 'LLM extraction failed');
@@ -644,7 +644,7 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
 
     // Update all audio files to completed
     await client.query(
-      `UPDATE audio_files SET transcription_status = $1, processed = $2 WHERE id = ANY($3)`,
+      `UPDATE audio_files SET status = $1, processed = $2 WHERE id = ANY($3)`,
       ['completed', true, audioFileIds]
     );
 
@@ -701,10 +701,10 @@ async function getDatabaseStats() {
   try {
     const result = await client.query(`
       SELECT 
-        transcription_status,
+        status,
         COUNT(*) as count
       FROM audio_files 
-      GROUP BY transcription_status
+      GROUP BY status
     `);
     
     const stats = {
@@ -715,8 +715,8 @@ async function getDatabaseStats() {
     };
     
     result.rows.forEach(row => {
-      switch (row.transcription_status) {
-        case 'pending':
+      switch (row.status) {
+        case 'uploaded':
         case 'queued':
           stats.waiting += parseInt(row.count);
           break;
