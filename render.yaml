@@ -37,8 +37,6 @@ services:
         value: info
     healthCheckPath: /health
     autoDeploy: true
-    buildCommand: npm install --only=production
-    startCommand: dumb-init node src/app.js
     # Resource limits
     plan: starter  # $7/month - 512MB RAM, shared CPU
     numInstances: 1
@@ -69,8 +67,6 @@ services:
           envVarKey: RENDER_EXTERNAL_URL  # Use external URL for API calls
     healthCheckPath: /
     autoDeploy: true
-    buildCommand: npm install && npm run build
-    startCommand: node server.js
     plan: starter  # $7/month
     numInstances: 1
     branch: integration-656-vibecode

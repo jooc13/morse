@@ -111,13 +111,16 @@ router.post('/', upload.single('audio'), async (req, res) => {
 
     const userId = user.rows[0].id;
 
-    const { filePath, fileSize, fileId } = await FileService.saveFile(req.file, originalFilename);
+    // For Render deployment, process file in memory without saving to disk
+    const fileSize = req.file.size;
+    const fileId = require('uuid').v4();
+    const filePath = `memory://${fileId}`; // Virtual path for database record
 
     const audioFile = await client.query(`
       INSERT INTO audio_files (
-        user_id, original_filename, file_path, file_size, 
+        user_id, original_filename, file_path, file_size,
         upload_timestamp, transcription_status
-      ) VALUES ($1, $2, $3, $4, $5, 'pending') 
+      ) VALUES ($1, $2, $3, $4, $5, 'pending')
       RETURNING id, upload_timestamp
     `, [userId, originalFilename, filePath, fileSize, deviceInfo.timestampDate]);
 
@@ -160,7 +163,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
 
       // Step 1: Transcribe audio
       console.log(`Transcribing audio file: ${audioFileId}`);
-      transcriptionResult = await TranscriptionService.transcribeAudio(filePath, audioFileId);
+      transcriptionResult = await TranscriptionService.transcribeAudio(req.file.buffer, audioFileId, originalFilename);
       
       if (!transcriptionResult.success) {
         // If it's a retryable error (like quota), mark as pending for retry
@@ -397,13 +400,16 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
         throw new Error(`File ${file.originalname} exceeds 50MB limit`);
       }
 
-      const { filePath, fileSize } = await FileService.saveFile(file, file.originalname);
-      
+      // For Render deployment, process file in memory
+      const fileSize = file.size;
+      const fileId = require('uuid').v4();
+      const filePath = `memory://${fileId}`;
+
       const audioFile = await client.query(`
         INSERT INTO audio_files (
-          user_id, original_filename, file_path, file_size, 
+          user_id, original_filename, file_path, file_size,
           upload_timestamp, transcription_status
-        ) VALUES ($1, $2, $3, $4, $5, 'processing') 
+        ) VALUES ($1, $2, $3, $4, $5, 'processing')
         RETURNING id
       `, [userId, file.originalname, filePath, fileSize, deviceInfo.timestampDate]);
 
@@ -417,7 +423,7 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
 
       // Transcribe each file
       try {
-        const transcriptionResult = await TranscriptionService.transcribeAudio(filePath, audioFileId);
+        const transcriptionResult = await TranscriptionService.transcribeAudio(file.buffer, audioFileId, file.originalname);
         if (transcriptionResult.success) {
           transcriptions.push(transcriptionResult.text);
           
