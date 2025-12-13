@@ -24,8 +24,8 @@ docker pull cpenny49/morse-frontend:amd64
 
 # Pull Bitnami images
 echo "📦 Pulling Bitnami images..."
-docker pull bitnami/postgresql:14
-docker pull bitnami/redis:7.2
+docker pull bitnami/postgresql:latest
+docker pull bitnami/redis:latest
 
 echo "✅ All images pulled successfully"
 

@@ -90,7 +90,7 @@ services:
     image: cpenny49/morse-frontend:amd64
     container_name: morse-frontend
     environment:
-      - REACT_APP_API_URL=http://localhost:3000/api
+      - REACT_APP_API_URL=https://morse-api-28mo.onrender.com
     ports:
       - "80:80"
     depends_on:

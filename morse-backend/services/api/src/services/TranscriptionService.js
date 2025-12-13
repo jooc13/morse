@@ -5,21 +5,21 @@ const fs = require('fs').promises;
 class TranscriptionService {
   constructor() {
     this.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-    this.geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    this.geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     this.provider = process.env.TRANSCRIPTION_PROVIDER || 'anthropic'; // anthropic, gemini, openai, assemblyai, etc.
   }
 
   /**
    * Transcribe audio file using external API
    */
-  async transcribeAudio(filePath, audioFileId, deviceUuid = null, userId = null) {
+  async transcribeAudio(filePath, audioFileId, deviceUuid = null, userId = null, audioBuffer = null) {
     try {
       if (this.provider === 'worker') {
-        return await this.transcribeWithWorker(filePath, audioFileId, deviceUuid, userId);
+        return await this.transcribeWithWorker(filePath, audioFileId, deviceUuid, userId, audioBuffer);
       } else if (this.provider === 'anthropic') {
-        return await this.transcribeWithAnthropic(filePath, audioFileId);
+        return await this.transcribeWithAnthropic(filePath, audioFileId, audioBuffer);
       } else if (this.provider === 'gemini') {
-        return await this.transcribeWithGemini(filePath, audioFileId);
+        return await this.transcribeWithGemini(filePath, audioFileId, '', audioBuffer);
       } else {
         throw new Error(`Unsupported transcription provider: ${this.provider}`);
       }
@@ -32,8 +32,22 @@ class TranscriptionService {
   /**
    * Transcribe using worker service (Whisper)
    */
-  async transcribeWithWorker(filePath, audioFileId, deviceUuid, userId) {
+  async transcribeWithWorker(filePath, audioFileId, deviceUuid, userId, audioBuffer = null) {
     try {
+      // For in-memory files, we can't use the worker since it expects files on disk
+      // Fall back to direct transcription with Anthropic or Gemini
+      if (filePath.startsWith('memory://')) {
+        console.log('In-memory file detected, falling back to direct transcription (worker not supported)');
+        // Prefer Anthropic, fall back to Gemini if not available
+        if (this.anthropicApiKey) {
+          return await this.transcribeWithAnthropic(filePath, audioFileId, audioBuffer);
+        } else if (this.geminiApiKey) {
+          return await this.transcribeWithGemini(filePath, audioFileId, '', audioBuffer);
+        } else {
+          throw new Error('No API keys available for transcription fallback');
+        }
+      }
+
       // Queue the audio file for transcription by the worker
       const queueService = require('../services/QueueService');
 
@@ -74,14 +88,21 @@ class TranscriptionService {
   /**
    * Transcribe using Anthropic Claude API
    */
-  async transcribeWithAnthropic(filePath, audioFileId) {
+  async transcribeWithAnthropic(filePath, audioFileId, audioBuffer = null) {
     if (!this.anthropicApiKey) {
       throw new Error('ANTHROPIC_API_KEY environment variable is required');
     }
 
     try {
-      // Read the audio file
-      const audioData = await fs.readFile(filePath);
+      // Read the audio file (handle both in-memory and disk files)
+      let audioData;
+      if (filePath.startsWith('memory://') && audioBuffer) {
+        // File is in memory
+        audioData = audioBuffer;
+      } else {
+        // File is on disk
+        audioData = await fs.readFile(filePath);
+      }
       const audioBase64 = audioData.toString('base64');
 
       // Determine MIME type from file extension
@@ -171,7 +192,7 @@ class TranscriptionService {
   /**
    * Transcribe using Google Gemini Pro API
    */
-  async transcribeWithGemini(filePathOrBuffer, audioFileId, fileName = '') {
+  async transcribeWithGemini(filePathOrBuffer, audioFileId, fileName = '', audioBuffer = null) {
     if (!this.geminiApiKey) {
       throw new Error('GOOGLE_GEMINI_API_KEY or GEMINI_API_KEY environment variable is required');
     }
@@ -183,6 +204,15 @@ class TranscriptionService {
 
       if (Buffer.isBuffer(filePathOrBuffer)) {
         audioData = filePathOrBuffer;
+        // Determine MIME type from filename if provided
+        if (fileName) {
+          const ext = path.extname(fileName).toLowerCase();
+          if (ext === '.m4a') mimeType = 'audio/mp4';
+          else if (ext === '.wav') mimeType = 'audio/wav';
+        }
+      } else if (typeof filePathOrBuffer === 'string' && filePathOrBuffer.startsWith('memory://') && audioBuffer) {
+        // File is in memory
+        audioData = audioBuffer;
         // Determine MIME type from filename if provided
         if (fileName) {
           const ext = path.extname(fileName).toLowerCase();
