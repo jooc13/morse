@@ -40,9 +40,7 @@ services:
     # Resource limits
     plan: starter  # $7/month - 512MB RAM, shared CPU
     numInstances: 1
-    # Health check configuration
-    healthCheckTimeout: 10
-    healthCheckInterval: 30
+    # Health check configuration - Render handles automatically
     # Auto-scaling (upgrade to paid plan)
     # minInstances: 1
     # maxInstances: 3
