@@ -15,6 +15,9 @@ const analyticsRoutes = require('./routes/analytics');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy for production (Render uses reverse proxy)
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(compression());
 app.use(morgan('combined'));
