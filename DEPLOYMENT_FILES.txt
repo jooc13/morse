@@ -1,0 +1,243 @@
+MORSE Render Deployment - File Structure
+========================================
+
+Root Directory
+├── render.yaml ⭐
+│   └── Infrastructure-as-code blueprint
+│       • Defines 4 services (frontend, API, DB, Redis)
+│       • Auto-configures environment variables
+│       • Enables health checks and auto-deploy
+│
+├── init-db.sh ⭐
+│   └── Database migration script
+│       • Runs before each deploy (preDeployCommand)
+│       • Executes migrations 001 → 006 in order
+│       • Skips test data in production
+│
+├── validate-render-config.sh ⭐
+│   └── Pre-deployment validator
+│       • Checks all required files exist
+│       • Verifies migrations are present
+│       • Confirms executable permissions
+│
+├── .env.example
+│   └── Environment variable template
+│       • Local development reference
+│       • Shows all required variables
+│       • Production variables auto-configured
+│
+├── QUICK_START.md 📖
+│   └── 30-second summary + 10-minute deployment
+│       • Fastest way to deploy
+│       • 4 simple steps
+│       • Common first-time issues
+│
+├── DEPLOYMENT_SUMMARY.md 📖
+│   └── Executive overview
+│       • What was deleted/simplified
+│       • Cost breakdown ($0 → $21/mo)
+│       • Timeline (10 minutes)
+│       • Scaling guide
+│
+├── DEPLOYMENT_CHECKLIST.md 📖
+│   └── Interactive checklist
+│       • Pre-deployment tasks
+│       • Deployment steps
+│       • Post-deployment verification
+│       • Monitoring setup
+│
+├── RENDER_DEPLOYMENT.md 📖
+│   └── Comprehensive guide
+│       • Detailed instructions
+│       • Full troubleshooting section
+│       • Cost analysis
+│       • Backup strategies
+│       • 20-minute read
+│
+├── ARCHITECTURE.md 📖
+│   └── Technical deep dive
+│       • System diagrams
+│       • Data flow
+│       • Database schema
+│       • Security model
+│       • 30-minute read
+│
+└── README_DEPLOYMENT.md 📖
+    └── Master index
+        • Links to all docs
+        • Quick reference
+        • Support resources
+
+Existing Project Structure (Unchanged)
+morse-backend/
+├── services/
+│   ├── api/
+│   │   ├── Dockerfile ✅ (used by render.yaml)
+│   │   ├── package.json ✅
+│   │   └── src/
+│   │       └── app.js (entry point)
+│   │
+│   ├── frontend/
+│   │   ├── Dockerfile ✅ (used by render.yaml)
+│   │   ├── package.json ✅
+│   │   ├── server.js (Express proxy)
+│   │   └── src/ (React app)
+│   │
+│   └── worker/ ❌ (not used in Render deployment)
+│
+└── database/
+    └── migrations/ ✅
+        ├── 001_initial_schema.sql
+        ├── 002_workout_tables.sql
+        ├── 003_workout_sessions.sql
+        ├── 004_auth_refactor.sql
+        ├── 005_teams.sql
+        ├── 005_test_data.sql (skipped in production)
+        └── 006_device_linking_system.sql
+
+Deployment Flow
+==============
+
+1. Developer pushes to GitHub
+   └── Triggers Render webhook
+
+2. Render detects render.yaml
+   └── Creates/updates 4 services:
+       ├── morse-frontend (Web Service)
+       ├── morse-api (Web Service)
+       ├── morse-db (PostgreSQL)
+       └── morse-redis (Redis)
+
+3. Database migrations run
+   └── ./init-db.sh executes before deploy
+       └── Runs migrations 001 → 006
+
+4. Docker builds execute in parallel
+   ├── Frontend: Dockerfile → Build React → Copy to Express server
+   └── Backend: Dockerfile → Install deps → Copy source
+
+5. Health checks verify services
+   ├── Frontend: GET / → 200 OK
+   └── Backend: GET /health → {"status": "healthy"}
+
+6. Zero-downtime deployment
+   └── Old instances kept alive until new ones are healthy
+
+7. Auto-configured environment variables link services
+   ├── DATABASE_URL → morse-api
+   ├── REDIS_* → morse-api
+   └── REACT_APP_API_URL → morse-frontend
+
+8. Services are live!
+   └── https://morse-frontend.onrender.com
+
+Key Design Decisions
+===================
+
+✅ KEPT (Necessary)
+- Dockerfiles (containerization)
+- Database migrations (schema versioning)
+- Health checks (reliability)
+- Environment variables (configuration)
+
+❌ DELETED (Unnecessary)
+- Kubernetes YAML (Render handles orchestration)
+- Worker service (transcription in API service)
+- Custom nginx (Render provides load balancing)
+- Manual SSL setup (Render provides free SSL)
+- Complex migration tools (simple bash script)
+
+= SIMPLIFIED
+- 15+ config files → 1 render.yaml
+- Manual env vars → Auto-configured
+- Multi-repo setup → Monorepo with paths
+
+Cost Optimization
+================
+
+Free Tier (90 days):
+  Frontend:     $0  (512MB RAM)
+  Backend:      $0  (512MB RAM)
+  PostgreSQL:   $0  (1GB, trial)
+  Redis:        $0  (25MB, always free)
+  ──────────────────
+  Total:        $0/month
+
+After Trial:
+  Frontend:     $7  (Starter)
+  Backend:      $7  (Starter)
+  PostgreSQL:   $7  (Starter, 10GB)
+  Redis:        $0  (Free tier)
+  ──────────────────
+  Total:        $21/month
+
+Scaling path (when needed):
+  Starter → Standard → Pro
+  $21/mo → $100/mo → $370/mo
+
+Recommendation: Stay on free/starter until 100+ users.
+
+Quick Reference
+==============
+
+Deploy Now:
+  → Read: QUICK_START.md (2 min)
+  → Run: ./validate-render-config.sh
+  → Push: git push origin main
+  → Deploy: https://dashboard.render.com/blueprints
+
+Troubleshooting:
+  → Check: Service logs in Render dashboard
+  → Verify: All services show "Live" status
+  → Test: Health endpoints
+  → Read: RENDER_DEPLOYMENT.md "Troubleshooting" section
+
+Need Help:
+  → Docs: RENDER_DEPLOYMENT.md
+  → Community: https://community.render.com
+  → Status: https://status.render.com
+
+Environment Variables (Manual):
+  ⚠️ GEMINI_API_KEY (required)
+     Set in: morse-api → Environment → Add Variable
+
+Everything Else:
+  ✅ Auto-configured via render.yaml
+
+Success Criteria
+===============
+
+You know it worked when:
+  1. All 4 services show green "Live" status
+  2. Frontend URL loads MORSE app
+  3. Can create user account
+  4. Can upload audio file
+  5. Transcription completes
+  6. Workout data appears in dashboard
+
+If any step fails:
+  → Check DEPLOYMENT_CHECKLIST.md
+  → Review service logs
+  → Verify GEMINI_API_KEY is set
+  → Restart failed service
+
+Production Readiness
+===================
+
+Ready Now:
+  ✅ Dockerized
+  ✅ Automated migrations
+  ✅ Health checks
+  ✅ Zero-downtime deploys
+  ✅ HTTPS/SSL
+  ✅ Rate limiting
+  ✅ Security headers
+  ✅ Logging
+
+Need Before Production:
+  ⚠️ Persistent file storage (S3/R2)
+  ⚠️ Error monitoring (Sentry)
+  ⚠️ Analytics (optional)
+  ⚠️ Custom domain (optional)
+  ⚠️ Backup strategy
+

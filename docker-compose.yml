@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: morse-postgres
+    environment:
+      POSTGRES_USER: morse
+      POSTGRES_PASSWORD: morse_dev_password
+      POSTGRES_DB: morse
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./morse-backend/database/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U morse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: morse-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Service (for local testing)
+  api:
+    build:
+      context: ./morse-backend/services/api
+      dockerfile: Dockerfile
+    container_name: morse-api
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://morse:morse_dev_password@postgres:5432/morse
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: dev_secret_key_change_in_production
+      LOG_LEVEL: debug
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./morse-backend/services/api/src:/app/src
+      - ./morse-backend/services/api/uploads:/app/uploads
+    restart: unless-stopped
+
+  # Frontend Service (for local testing)
+  frontend:
+    build:
+      context: ./morse-backend/services/frontend
+      dockerfile: Dockerfile
+    container_name: morse-frontend
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      REACT_APP_API_URL: http://api:3000
+    depends_on:
+      - api
+    volumes:
+      - ./morse-backend/services/frontend/src:/app/src
+      - ./morse-backend/services/frontend/public:/app/public
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
