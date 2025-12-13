@@ -24,11 +24,9 @@ services:
           type: redis
           name: morse-redis
           property: port
-      - key: REDIS_PASSWORD
-        fromService:
-          type: redis
-          name: morse-redis
-          property: password
+      # Redis password is not needed for Render's managed Redis
+      # - key: REDIS_PASSWORD
+      #   value: ""
       - key: GEMINI_API_KEY
         sync: false  # Set manually in Render dashboard
       - key: JWT_SECRET
