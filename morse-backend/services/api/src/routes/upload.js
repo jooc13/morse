@@ -181,13 +181,13 @@ router.post('/', upload.single('audio'), async (req, res) => {
     const audioFile = await client.query(`
       INSERT INTO audio_files (
         user_id, original_filename, file_path, file_size,
-        upload_timestamp, transcription_status
-      ) VALUES ($1, $2, $3, $4, $5, 'pending')
-      RETURNING id, upload_timestamp
-    `, [userId, originalFilename, filePath, fileSize, deviceInfo.timestampDate]);
+        transcription_status
+      ) VALUES ($1, $2, $3, $4, 'pending')
+      RETURNING id, created_at
+    `, [userId, originalFilename, filePath, fileSize]);
 
     const audioFileId = audioFile.rows[0].id;
-    const uploadTimestamp = audioFile.rows[0].upload_timestamp;
+    const uploadTimestamp = audioFile.rows[0].created_at || deviceInfo.timestampDate;
 
     await client.query(
       'UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1',
@@ -471,10 +471,10 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
       const audioFile = await client.query(`
         INSERT INTO audio_files (
           user_id, original_filename, file_path, file_size,
-          upload_timestamp, transcription_status
-        ) VALUES ($1, $2, $3, $4, $5, 'processing')
+          transcription_status
+        ) VALUES ($1, $2, $3, $4, 'processing')
         RETURNING id
-      `, [userId, file.originalname, filePath, fileSize, deviceInfo.timestampDate]);
+      `, [userId, file.originalname, filePath, fileSize]);
 
       const audioFileId = audioFile.rows[0].id;
       audioFileIds.push(audioFileId);
