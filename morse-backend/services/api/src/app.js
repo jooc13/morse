@@ -11,6 +11,7 @@ const workoutRoutes = require('./routes/workouts');
 const { router: authRoutes } = require('./routes/auth');
 const teamsRoutes = require('./routes/teams');
 const analyticsRoutes = require('./routes/analytics');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -40,6 +41,7 @@ app.use('/api/upload', uploadLimiter, uploadRoutes);
 app.use('/api/workouts', workoutRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/teams', teamsRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/f513a0a', analyticsRoutes);
 
 app.get('/health', (req, res) => {
