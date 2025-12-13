@@ -1,5 +1,4 @@
 const axios = require('axios');
-const fs = require('fs').promises;
 const path = require('path');
 
 class TranscriptionService {
@@ -11,10 +10,10 @@ class TranscriptionService {
   /**
    * Transcribe audio file using external API
    */
-  async transcribeAudio(filePath, audioFileId) {
+  async transcribeAudio(filePathOrBuffer, audioFileId) {
     try {
       if (this.provider === 'gemini') {
-        return await this.transcribeWithGemini(filePath, audioFileId);
+        return await this.transcribeWithGemini(filePathOrBuffer, audioFileId);
       } else {
         throw new Error(`Unsupported transcription provider: ${this.provider}`);
       }
@@ -27,24 +26,34 @@ class TranscriptionService {
   /**
    * Transcribe using Google Gemini Pro API
    */
-  async transcribeWithGemini(filePath, audioFileId) {
+  async transcribeWithGemini(filePathOrBuffer, audioFileId, fileName = '') {
     if (!this.apiKey) {
       throw new Error('GOOGLE_GEMINI_API_KEY or GEMINI_API_KEY environment variable is required');
     }
 
     try {
-      // Read the audio file
-      const audioData = await fs.readFile(filePath);
-      const audioBase64 = audioData.toString('base64');
-      
-      // Determine MIME type from file extension
-      const ext = path.extname(filePath).toLowerCase();
+      // Handle both file path and buffer
+      let audioData;
       let mimeType = 'audio/mpeg';
-      if (ext === '.m4a') {
-        mimeType = 'audio/mp4';
-      } else if (ext === '.wav') {
-        mimeType = 'audio/wav';
+
+      if (Buffer.isBuffer(filePathOrBuffer)) {
+        audioData = filePathOrBuffer;
+        // Determine MIME type from filename if provided
+        if (fileName) {
+          const ext = path.extname(fileName).toLowerCase();
+          if (ext === '.m4a') mimeType = 'audio/mp4';
+          else if (ext === '.wav') mimeType = 'audio/wav';
+        }
+      } else {
+        // For backward compatibility, read from file path
+        const fs = require('fs').promises;
+        audioData = await fs.readFile(filePathOrBuffer);
+        const ext = path.extname(filePathOrBuffer).toLowerCase();
+        if (ext === '.m4a') mimeType = 'audio/mp4';
+        else if (ext === '.wav') mimeType = 'audio/wav';
       }
+
+      const audioBase64 = audioData.toString('base64');
 
       // Call Gemini API for transcription
       // Using gemini-2.0-flash-exp or gemini-1.5-pro for audio support
