@@ -1,0 +1,96 @@
+services:
+  # Backend API Service
+  - type: web
+    name: morse-api
+    runtime: docker
+    dockerfilePath: ./morse-backend/services/api/Dockerfile
+    dockerContext: ./morse-backend/services/api
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: morse-db
+          property: connectionString
+      - key: REDIS_HOST
+        fromService:
+          type: redis
+          name: morse-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: redis
+          name: morse-redis
+          property: port
+      - key: REDIS_PASSWORD
+        fromService:
+          type: redis
+          name: morse-redis
+          property: password
+      - key: GEMINI_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: JWT_SECRET
+        generateValue: true  # Auto-generate secure secret
+      - key: LOG_LEVEL
+        value: info
+    healthCheckPath: /health
+    autoDeploy: true
+    buildCommand: npm install --only=production
+    startCommand: dumb-init node src/app.js
+    # Resource limits
+    plan: starter  # $7/month - 512MB RAM, shared CPU
+    numInstances: 1
+    # Health check configuration
+    healthCheckTimeout: 10
+    healthCheckInterval: 30
+    # Auto-scaling (upgrade to paid plan)
+    # minInstances: 1
+    # maxInstances: 3
+    # Auto-deploy from main branch
+    branch: main
+
+  # Frontend Service (React + Express proxy)
+  - type: web
+    name: morse-frontend
+    runtime: docker
+    dockerfilePath: ./morse-backend/services/frontend/Dockerfile
+    dockerContext: ./morse-backend/services/frontend
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: REACT_APP_API_URL
+        fromService:
+          type: web
+          name: morse-api
+          envVarKey: RENDER_EXTERNAL_URL  # Use external URL for API calls
+    healthCheckPath: /
+    autoDeploy: true
+    buildCommand: npm install && npm run build
+    startCommand: node server.js
+    plan: starter  # $7/month
+    numInstances: 1
+    branch: main
+
+  # Redis Service - Managed Redis for job queues
+  - type: redis
+    name: morse-redis
+    plan: free  # Free tier: 25MB storage
+    maxmemoryPolicy: allkeys-lru  # Evict old keys when memory full
+    ipAllowList: []  # Allow from any Render service
+
+databases:
+  # Managed PostgreSQL - Starts free (90 days), then $7/month
+  - name: morse-db
+    databaseName: morse
+    user: morse
+    plan: free  # Free tier for 90 days, then switches to starter ($7/mo)
+    # Database initialization is handled via the init_database.sh script
+    # Run manually after first deployment:
+    #   1. SSH into any service: render shell -s morse-api
+    #   2. Navigate to database directory: cd /app/morse-backend/database
+    #   3. Run: ./init_database.sh
+    # For subsequent deployments, the idempotent scripts handle updates safely
