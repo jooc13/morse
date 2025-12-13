@@ -4,54 +4,162 @@ import logging
 import asyncio
 from typing import Dict, Any, List
 from datetime import datetime, date
-import anthropic
+from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
-class WorkoutLLMProcessor:
-    def __init__(self):
-        api_key = os.getenv('ANTHROPIC_API_KEY')
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY environment variable is required")
-        
-        self.client = anthropic.Anthropic(
-            api_key=api_key
-        )
+class LLMProvider(ABC):
+    """Abstract base class for LLM providers"""
+
+    @abstractmethod
+    def __init__(self, api_key: str):
+        pass
+
+    @abstractmethod
+    async def generate_response(self, prompt: str) -> str:
+        pass
+
+    @abstractmethod
+    def health_check(self) -> bool:
+        pass
+
+class ClaudeProvider(LLMProvider):
+    """Anthropic Claude provider"""
+
+    def __init__(self, api_key: str):
+        import anthropic
+        self.client = anthropic.Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-20250514"
 
-    async def extract_workout_data(self, transcription: str, device_uuid: str, is_session: bool = False, recording_count: int = 1) -> Dict[str, Any]:
-        """Extract structured workout data from transcription using Claude"""
+    async def generate_response(self, prompt: str) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._call_claude_sync, prompt)
+
+    def _call_claude_sync(self, prompt: str) -> str:
         try:
-            logger.info(f"Processing transcription with LLM for device {device_uuid}")
-            
-            # Prepare the prompt for Claude
-            prompt = self._build_extraction_prompt(transcription, is_session, recording_count)
-            
-            # Call Claude API
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                self._call_claude_sync,
-                prompt
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=2000,
+                temperature=0.1,
+                messages=[{"role": "user", "content": prompt}]
             )
-            
+            return message.content[0].text
+        except Exception as e:
+            logger.error(f"Claude API error: {e}")
+            raise
+
+    def health_check(self) -> bool:
+        try:
+            return bool(os.getenv('ANTHROPIC_API_KEY'))
+        except Exception:
+            return False
+
+class GeminiProvider(LLMProvider):
+    """Google Gemini provider"""
+
+    def __init__(self, api_key: str):
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel('gemini-2.0-flash-001')
+
+    async def generate_response(self, prompt: str) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._call_gemini_sync, prompt)
+
+    def _call_gemini_sync(self, prompt: str) -> str:
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config={
+                    'temperature': 0.1,
+                    'max_output_tokens': 2000,
+                }
+            )
+            return response.text
+        except Exception as e:
+            logger.error(f"Gemini API error: {e}")
+            raise
+
+    def health_check(self) -> bool:
+        try:
+            return bool(os.getenv('GOOGLE_API_KEY'))
+        except Exception:
+            return False
+
+class WorkoutLLMProcessor:
+    """Unified LLM processor supporting multiple providers with session handling"""
+
+    def __init__(self):
+        self.provider = self._initialize_provider()
+        if not self.provider:
+            raise ValueError("No valid LLM provider configured. Set ANTHROPIC_API_KEY or GOOGLE_API_KEY")
+
+    def _initialize_provider(self) -> LLMProvider:
+        """Initialize the best available LLM provider"""
+
+        # Check for provider preference
+        llm_provider = os.getenv('LLM_PROVIDER', 'auto').lower()
+
+        if llm_provider == 'anthropic' or llm_provider == 'claude':
+            api_key = os.getenv('ANTHROPIC_API_KEY')
+            if api_key:
+                logger.info("Using Anthropic Claude provider")
+                return ClaudeProvider(api_key)
+            else:
+                logger.warning("ANTHROPIC_API_KEY not found, trying other providers")
+
+        elif llm_provider == 'google' or llm_provider == 'gemini':
+            api_key = os.getenv('GOOGLE_API_KEY')
+            if api_key:
+                logger.info("Using Google Gemini provider")
+                return GeminiProvider(api_key)
+            else:
+                logger.warning("GOOGLE_API_KEY not found, trying other providers")
+
+        # Auto-detect best available provider
+        elif llm_provider == 'auto':
+            # Prefer free Gemini if available
+            google_key = os.getenv('GOOGLE_API_KEY')
+            if google_key:
+                logger.info("Auto-selected Google Gemini provider (free)")
+                return GeminiProvider(google_key)
+
+            # Fallback to Claude
+            anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+            if anthropic_key:
+                logger.info("Auto-selected Anthropic Claude provider")
+                return ClaudeProvider(anthropic_key)
+
+        return None
+
+    async def extract_workout_data(self, transcription: str, device_uuid: str, is_session: bool = False, recording_count: int = 1) -> Dict[str, Any]:
+        """Extract structured workout data from transcription using configured LLM"""
+        try:
+            logger.info(f"Processing transcription with {self.provider.__class__.__name__} for device {device_uuid}")
+
+            # Prepare the prompt for the LLM
+            prompt = self._build_extraction_prompt(transcription, is_session, recording_count)
+
+            # Call the LLM API
+            response = await self.provider.generate_response(prompt)
+
             # Parse the response
-            workout_data = self._parse_claude_response(response)
-            
+            workout_data = self._parse_llm_response(response)
+
             if not workout_data:
                 return {
                     'success': False,
                     'error': 'Failed to parse workout data from LLM response'
                 }
-            
+
             exercise_count = len(workout_data.get('exercises', []))
             logger.info(f"Successfully extracted workout data: {exercise_count} exercises from {recording_count} recording(s)")
-            
+
             return {
                 'success': True,
                 'workout': workout_data
             }
-            
+
         except Exception as e:
             logger.error(f"LLM processing error: {str(e)}")
             return {
@@ -60,7 +168,7 @@ class WorkoutLLMProcessor:
             }
 
     def _build_extraction_prompt(self, transcription: str, is_session: bool = False, recording_count: int = 1) -> str:
-        """Build the prompt for Claude to extract workout data"""
+        """Build the prompt for LLM to extract workout data"""
         session_context = ""
         if is_session and recording_count > 1:
             session_context = f"""
@@ -139,49 +247,28 @@ Transcription:
 
 Respond with ONLY the JSON object, no additional text or explanation."""
 
-    def _call_claude_sync(self, prompt: str) -> str:
-        """Synchronous call to Claude API"""
+    def _parse_llm_response(self, response: str) -> Dict[str, Any]:
+        """Parse LLM's JSON response"""
         try:
-            message = self.client.messages.create(
-                model=self.model,
-                max_tokens=2000,
-                temperature=0.1,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
-            )
-            
-            return message.content[0].text
-            
-        except Exception as e:
-            logger.error(f"Claude API error: {e}")
-            raise
-
-    def _parse_claude_response(self, response: str) -> Dict[str, Any]:
-        """Parse Claude's JSON response"""
-        try:
-            # Clean up the response - sometimes Claude adds extra text
+            # Clean up the response - sometimes LLMs add extra text
             response = response.strip()
-            
+
             # Find JSON object in response
             start_idx = response.find('{')
             end_idx = response.rfind('}') + 1
-            
+
             if start_idx == -1 or end_idx == 0:
                 logger.error("No JSON object found in response")
                 return None
-                
+
             json_str = response[start_idx:end_idx]
             workout_data = json.loads(json_str)
-            
+
             # Validate and clean the data
             workout_data = self._validate_workout_data(workout_data)
-            
+
             return workout_data
-            
+
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing error: {e}")
             logger.error(f"Response: {response}")
@@ -195,10 +282,10 @@ Respond with ONLY the JSON object, no additional text or explanation."""
         try:
             # Set defaults - always use today's date for new uploads
             data['workout_date'] = date.today().isoformat()
-            
+
             if 'exercises' not in data:
                 data['exercises'] = []
-            
+
             # Validate exercises
             validated_exercises = []
             for i, exercise in enumerate(data['exercises']):
@@ -216,46 +303,40 @@ Respond with ONLY the JSON object, no additional text or explanation."""
                     'notes': exercise.get('notes'),
                     'order_in_workout': exercise.get('order_in_workout', i + 1)
                 }
-                
+
                 # Validate effort level range
                 if validated_exercise['effort_level'] is not None:
                     effort = validated_exercise['effort_level']
                     if not isinstance(effort, (int, float)) or effort < 1 or effort > 10:
                         validated_exercise['effort_level'] = None
-                
+
                 # Ensure arrays are lists
                 for array_field in ['reps', 'weight_lbs', 'muscle_groups']:
                     if validated_exercise[array_field] and not isinstance(validated_exercise[array_field], list):
                         validated_exercise[array_field] = [validated_exercise[array_field]]
-                
+
                 validated_exercises.append(validated_exercise)
-            
+
             data['exercises'] = validated_exercises
             data['total_exercises'] = len(validated_exercises)
-            
+
             return data
-            
+
         except Exception as e:
             logger.error(f"Data validation error: {e}")
             return data
 
     async def generate_workout_feedback(self, workout_data: Dict[str, Any], user_history: List[Dict]) -> Dict[str, Any]:
-        """Generate personalized workout feedback using Claude"""
+        """Generate personalized workout feedback using configured LLM"""
         try:
             prompt = self._build_feedback_prompt(workout_data, user_history)
-            
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                self._call_claude_sync,
-                prompt
-            )
-            
+            response = await self.provider.generate_response(prompt)
+
             return {
                 'success': True,
                 'feedback': response
             }
-            
+
         except Exception as e:
             logger.error(f"Feedback generation error: {e}")
             return {
@@ -275,7 +356,7 @@ Recent Workout History (last 5 workouts):
 
 Provide feedback covering:
 1. Exercise variety and muscle group coverage
-2. Progressive overload opportunities  
+2. Progressive overload opportunities
 3. Potential gaps in training
 4. Recovery and rest considerations
 5. Specific suggestions for improvement
@@ -287,16 +368,16 @@ Keep feedback concise, actionable, and encouraging. Focus on 2-3 key insights.""
         try:
             combined_text = session_transcription_data['combinedText']
             recording_count = session_transcription_data['totalRecordings']
-            
+
             logger.info(f"Processing session with {recording_count} recordings for device {device_uuid}")
-            
+
             return await self.extract_workout_data(
-                combined_text, 
-                device_uuid, 
-                is_session=True, 
+                combined_text,
+                device_uuid,
+                is_session=True,
                 recording_count=recording_count
             )
-            
+
         except Exception as e:
             logger.error(f"Session LLM processing error: {str(e)}")
             return {
@@ -306,7 +387,16 @@ Keep feedback concise, actionable, and encouraging. Focus on 2-3 key insights.""
 
     def health_check(self) -> bool:
         """Check if the LLM processor is working"""
-        try:
-            return bool(os.getenv('ANTHROPIC_API_KEY'))
-        except Exception:
-            return False
+        return self.provider.health_check() if self.provider else False
+
+    def get_provider_info(self) -> Dict[str, Any]:
+        """Get information about the current provider"""
+        if not self.provider:
+            return {"provider": "none", "status": "error"}
+
+        provider_name = self.provider.__class__.__name__.replace("Provider", "")
+        return {
+            "provider": provider_name.lower(),
+            "status": "ready",
+            "health": self.provider.health_check()
+        }
