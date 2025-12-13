@@ -6,7 +6,8 @@ class TranscriptionService {
   constructor() {
     this.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
     this.geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    this.provider = process.env.TRANSCRIPTION_PROVIDER || 'anthropic'; // anthropic, gemini, openai, assemblyai, etc.
+    // Default to gemini since we have the API key
+    this.provider = process.env.TRANSCRIPTION_PROVIDER || 'gemini'; // anthropic, gemini, openai, assemblyai, etc.
   }
 
   /**
