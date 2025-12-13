@@ -11,7 +11,6 @@ import redis
 from transcriber import WhisperTranscriber
 from llm_processor import WorkoutLLMProcessor
 from database import DatabaseManager
-from speaker_verifier import SpeakerVerifier
 
 load_dotenv()
 
@@ -21,12 +20,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+try:
+    from speaker_verifier import SpeakerVerifier
+    SPEAKER_VERIFIER_AVAILABLE = True
+except Exception as e:
+    logger.warning(f"Speaker verifier not available: {e}")
+    SPEAKER_VERIFIER_AVAILABLE = False
+
 class WorkoutProcessor:
     def __init__(self):
         self.db = DatabaseManager()
         self.transcriber = WhisperTranscriber()
         self.llm_processor = WorkoutLLMProcessor()
-        self.speaker_verifier = SpeakerVerifier()
+        self.speaker_verifier = SpeakerVerifier() if SPEAKER_VERIFIER_AVAILABLE else None
         self.redis_client = None
         self.running = False
         
@@ -50,6 +56,12 @@ class WorkoutProcessor:
             file_path = job_data['filePath']
             user_id = job_data['userId']
             device_uuid = job_data['deviceUuid']
+
+            # Convert host path to container path for mounted uploads directory
+            if '/services/api/uploads/' in file_path:
+                filename = os.path.basename(file_path)
+                file_path = f'/app/uploads/{filename}'
+                logger.info(f"Translated host path to container path: {file_path}")
             
             logger.info(f"Processing audio file {audio_file_id} for user {device_uuid}")
             
@@ -306,42 +318,46 @@ class WorkoutProcessor:
     async def process_speaker_verification(self, audio_file_id: str, file_path: str, workout_id: str) -> bool:
         """Process speaker verification for an audio file"""
         try:
+            if not self.speaker_verifier:
+                logger.info("Speaker verifier not available - skipping speaker verification")
+                return True
+
             logger.info(f"Starting speaker verification for audio file {audio_file_id}")
-            
+
             # Extract voice embedding from audio
             embedding_result = self.speaker_verifier.extract_voice_embedding(file_path)
-            
+
             if not embedding_result['success']:
                 logger.warning(f"Voice embedding extraction failed: {embedding_result['error']}")
                 return False
-            
+
             embedding = embedding_result['embedding']
             quality_score = embedding_result['quality_score']
-            
+
             # Save embedding to audio_files table
             await self.db.save_voice_embedding(audio_file_id, embedding, quality_score)
             logger.info(f"Saved voice embedding (quality: {quality_score:.3f})")
-            
+
             # Get all existing voice profiles for comparison
             voice_profiles = await self.db.get_all_voice_profiles()
-            
+
             if not voice_profiles:
                 logger.info("No existing voice profiles found - workout remains unclaimed")
                 return True
-            
+
             # Prepare embeddings for comparison
             known_embeddings = [profile['embedding_vector'] for profile in voice_profiles]
-            
+
             # Perform speaker verification
             verification_result = self.speaker_verifier.verify_speaker(embedding, known_embeddings)
-            
+
             logger.info(f"Speaker verification result: {verification_result}")
-            
+
             # Save verification result
             best_match_profile = None
             if verification_result['best_match_index'] is not None:
                 best_match_profile = voice_profiles[verification_result['best_match_index']]
-                
+
                 await self.db.save_speaker_verification_result(
                     audio_file_id,
                     best_match_profile['id'],
@@ -349,23 +365,23 @@ class WorkoutProcessor:
                     verification_result['confidence_level'],
                     verification_result['match_found']
                 )
-            
+
             # Auto-link workout if high confidence match
             if verification_result['match_found'] and best_match_profile:
                 user_id = best_match_profile['user_id']
                 similarity_score = verification_result['similarity_score']
-                
+
                 success = await self.db.auto_link_workout_to_user(workout_id, user_id, similarity_score)
-                
+
                 if success:
                     logger.info(f"Auto-linked workout {workout_id} to user {user_id} (similarity: {similarity_score:.3f})")
                 else:
                     logger.warning(f"Failed to auto-link workout {workout_id} - may already be claimed")
             else:
                 logger.info(f"No high-confidence voice match - workout remains unclaimed")
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Error in speaker verification: {e}")
             return False

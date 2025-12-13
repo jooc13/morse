@@ -1,0 +1,133 @@
+services:
+  # Database
+  postgres:
+    image: postgres:15
+    container_name: morse-postgres
+    environment:
+      POSTGRES_DB: morse_db
+      POSTGRES_USER: morse_user
+      POSTGRES_PASSWORD: morse_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U morse_user -d morse_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for job queuing
+  redis:
+    image: redis:7-alpine
+    container_name: morse-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # API Service
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    container_name: morse-api
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=postgresql://morse_user:morse_password@postgres:5432/morse_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # LLM Provider Configuration - set your API keys
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+      # Testing configuration
+      - DISABLE_LEGACY_UPLOAD=false
+      - TEST_DEVICE_UUID=f47ac10b-58cc-4372-a567-0e02b2c4c4a9
+      - JWT_SECRET=test-jwt-secret-change-in-production
+    volumes:
+      - ./services/api/src:/app/src
+      - ./uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Worker Service
+  worker:
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile
+    container_name: morse-worker
+    environment:
+      - DATABASE_URL=postgresql://morse_user:morse_password@postgres:5432/morse_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # LLM Provider Configuration - set your API keys
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+      # Transcription configuration
+      - WHISPER_MODEL=base
+    volumes:
+      - ./services/worker/src:/app/src
+      - ./uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+    container_name: morse-frontend
+    ports:
+      - "8080:3000"
+    environment:
+      - NODE_ENV=development
+      - REACT_APP_API_URL=http://localhost:3000/api
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./services/frontend/src:/app/src
+      - ./services/frontend/public:/app/public
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # PgAdmin for database management (optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: morse-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@morse.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: morse-network
