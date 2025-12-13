@@ -6,6 +6,9 @@ const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 require('dotenv').config();
 
+// Import database initialization
+const { initializeDatabase } = require('./utils/database-init');
+
 const uploadRoutes = require('./routes/upload');
 const workoutRoutes = require('./routes/workouts');
 const { router: authRoutes } = require('./routes/auth');
@@ -88,7 +91,21 @@ app.use((error, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Morse API server running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-});
+// Initialize database on startup
+async function startServer() {
+  try {
+    // Initialize database tables if they don't exist
+    await initializeDatabase();
+
+    app.listen(PORT, () => {
+      console.log(`Morse API server running on port ${PORT}`);
+      console.log(`Health check: http://localhost:${PORT}/health`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+// Start the server
+startServer();
