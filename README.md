@@ -207,7 +207,22 @@ curl -X POST -H "Content-Type: application/json" \
   -F "audio=@test_workout.mp3"
 ```
 
-### 6. Access the Application
+### 6. Test the Application
+
+**Sample Audio Files**:
+The repository includes sample workout recordings in the `/Sample Recording` folder to test the voice-to-workout transcription feature:
+
+- `Sample Recording 2.m4a` (25.6 KB)
+- `Sample Recording 3.mp3` (39.7 KB)
+- `Sample Recording 4.mp3` (39.4 KB)
+- `Sample Recording 5.m4a` (19.4 KB)
+
+**Testing Steps**:
+1. Navigate to the Upload page in the application
+2. Select any of the sample audio files from the `/Sample Recording` folder
+3. Upload to see the AI-powered transcription and workout extraction in action
+
+### 7. Access the Application
 
 - **Frontend Dashboard**: http://localhost:3001
 - **API Health Check**: http://localhost:3000/health
