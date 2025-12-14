@@ -285,20 +285,18 @@ router.post('/', upload.single('audio'), async (req, res) => {
       // Step 3: Save workout and exercises (only if both transcription and LLM succeeded)
       if (transcriptionResult.success && workoutDataResult && workoutDataResult.success) {
         const workoutDate = deviceInfo.timestampDate.toISOString().split('T')[0];
-        const workoutTime = deviceInfo.timestampDate.toTimeString().split(' ')[0].substring(0, 5);
       
       const workoutInsert = await client.query(`
         INSERT INTO workouts (
           user_id, audio_file_id, transcription_id, date_completed,
-          workout_start_time, workout_duration_minutes, total_exercises, notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          workout_duration_minutes, total_exercises, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
       `, [
         userId,
         audioFileId,
         transcriptionId,
         workoutDate,
-        workoutTime,
         workoutDataResult.workout.workout_duration_minutes || null,
         workoutDataResult.workout.exercises?.length || 0,
         workoutDataResult.workout.notes || null
@@ -606,19 +604,17 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
 
     // Create one workout for all files
     const workoutDate = deviceInfo.timestampDate.toISOString().split('T')[0];
-    const workoutTime = deviceInfo.timestampDate.toTimeString().split(' ')[0].substring(0, 5);
     
     const workoutInsert = await client.query(`
       INSERT INTO workouts (
         user_id, audio_file_id, transcription_id, date_completed,
-        workout_start_time, workout_duration_minutes, total_exercises, notes
-      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+        workout_duration_minutes, total_exercises, notes
+      ) VALUES ($1, $2, NULL, $3, $4, $5, $6)
       RETURNING id
     `, [
       userId,
       audioFileIds[0], // Use first audio file as primary
       workoutDate,
-      workoutTime,
       workoutDataResult.workout.workout_duration_minutes || null,
       workoutDataResult.workout.exercises?.length || 0,
       workoutDataResult.workout.notes || null
