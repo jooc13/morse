@@ -173,6 +173,169 @@ class SessionService {
       client.release();
     }
   }
+
+  /**
+   * Gets session summary with audio files and workouts
+   */
+  async getSessionSummary(sessionId) {
+    const client = await this.pool.connect();
+
+    try {
+      // Get session details
+      const sessionResult = await client.query(
+        'SELECT * FROM sessions WHERE id = $1',
+        [sessionId]
+      );
+
+      if (sessionResult.rows.length === 0) {
+        return null;
+      }
+
+      const session = sessionResult.rows[0];
+
+      // Get audio files
+      const audioFilesResult = await client.query(`
+        SELECT
+          af.id,
+          af.original_filename,
+          af.status as transcription_status,
+          af.created_at as upload_timestamp,
+          t.raw_text as transcription,
+          t.confidence_score
+        FROM audio_files af
+        LEFT JOIN transcriptions t ON af.id = t.audio_file_id
+        WHERE af.session_id = $1
+        ORDER BY af.created_at ASC
+      `, [sessionId]);
+
+      // Get workouts
+      const workoutsResult = await client.query(`
+        SELECT
+          w.id,
+          w.workout_date,
+          w.workout_start_time,
+          w.duration_seconds,
+          w.total_exercises,
+          w.created_at
+        FROM workouts w
+        WHERE w.session_id = $1
+        ORDER BY w.created_at ASC
+      `, [sessionId]);
+
+      return {
+        session,
+        audioFiles: audioFilesResult.rows,
+        workouts: workoutsResult.rows
+      };
+
+    } catch (error) {
+      console.error('Error getting session summary:', error);
+      return null;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Checks if a session is ready for processing
+   */
+  async isSessionReadyForProcessing(sessionId) {
+    const client = await this.pool.connect();
+
+    try {
+      // Check if session exists and has audio files
+      const result = await client.query(`
+        SELECT
+          s.id,
+          s.status,
+          COUNT(DISTINCT af.id) as audio_count,
+          COUNT(DISTINCT CASE WHEN af.status = 'completed' THEN af.id END) as transcribed_count
+        FROM sessions s
+        LEFT JOIN audio_files af ON s.id = af.session_id
+        WHERE s.id = $1
+        GROUP BY s.id, s.status
+      `, [sessionId]);
+
+      if (result.rows.length === 0) {
+        return { ready: false, reason: 'Session not found' };
+      }
+
+      const session = result.rows[0];
+
+      if (session.status !== 'active') {
+        return { ready: false, reason: 'Session not active' };
+      }
+
+      if (session.audio_count === 0) {
+        return { ready: false, reason: 'No audio files' };
+      }
+
+      return { ready: true };
+
+    } catch (error) {
+      console.error('Error checking session readiness:', error);
+      return { ready: false, reason: 'Error checking session' };
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Updates session status
+   */
+  async updateSessionStatus(sessionId, status, notes = null) {
+    const client = await this.pool.connect();
+
+    try {
+      let query = 'UPDATE sessions SET status = $1, updated_at = CURRENT_TIMESTAMP';
+      const params = [status];
+
+      if (notes) {
+        query += ', notes = $2';
+        params.push(notes);
+      }
+
+      query += ' WHERE id = $' + (params.length + 1);
+      params.push(sessionId);
+
+      await client.query(query, params);
+      return true;
+
+    } catch (error) {
+      console.error('Error updating session status:', error);
+      return false;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Auto-completes old sessions
+   */
+  async autoCompleteOldSessions(maxAgeHours = 24) {
+    const client = await this.pool.connect();
+
+    try {
+      const result = await client.query(`
+        UPDATE sessions
+        SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+        WHERE status = 'active'
+          AND updated_at < NOW() - INTERVAL '${maxAgeHours} hours'
+        RETURNING id
+      `);
+
+      return {
+        completed: result.rows.length,
+        sessionIds: result.rows.map(row => row.id)
+      };
+
+    } catch (error) {
+      console.error('Error auto-completing sessions:', error);
+      return { completed: 0, sessionIds: [] };
+    } finally {
+      client.release();
+    }
+  }
 }
 
 module.exports = new SessionService();

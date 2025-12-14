@@ -3,11 +3,10 @@ const multer = require('multer');
 const { Pool } = require('pg');
 const FileService = require('../services/FileService');
 const QueueService = require('../services/QueueService');
-const SessionService = require('../services/SessionService');
+const sessionService = require('../services/SessionService');
 const TranscriptionService = require('../services/TranscriptionService');
 
 const router = express.Router();
-const sessionService = new SessionService();
 
 // Create pool with fallback for integration testing
 let pool;
