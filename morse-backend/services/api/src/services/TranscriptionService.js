@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
-const fs = require('fs').promises;
+const fs = require('fs');
+const fsPromises = require('fs').promises;
 
 class TranscriptionService {
   constructor() {
@@ -43,12 +44,12 @@ class TranscriptionService {
       if (filePath.startsWith('memory://') && audioBuffer) {
         // Create a temporary file for OpenAI API
         tempFilePath = `/tmp/temp-audio-${audioFileId}.mp3`;
-        await fs.writeFile(tempFilePath, audioBuffer);
+        await fsPromises.writeFile(tempFilePath, audioBuffer);
         audioFile = fs.createReadStream(tempFilePath);
       } else if (Buffer.isBuffer(audioBuffer)) {
         // Direct buffer input
         tempFilePath = `/tmp/temp-audio-${audioFileId}.mp3`;
-        await fs.writeFile(tempFilePath, audioBuffer);
+        await fsPromises.writeFile(tempFilePath, audioBuffer);
         audioFile = fs.createReadStream(tempFilePath);
       } else {
         // Regular file path
@@ -68,7 +69,7 @@ class TranscriptionService {
       // Clean up temporary file if created
       if (tempFilePath) {
         try {
-          await fs.unlink(tempFilePath);
+          await fsPromises.unlink(tempFilePath);
         } catch (error) {
           console.warn('Failed to delete temp file:', tempFilePath, error.message);
         }
@@ -90,7 +91,7 @@ class TranscriptionService {
       // Clean up temporary file on error
       if (tempFilePath) {
         try {
-          await fs.unlink(tempFilePath);
+          await fsPromises.unlink(tempFilePath);
         } catch (cleanupError) {
           console.warn('Failed to delete temp file during cleanup:', tempFilePath, cleanupError.message);
         }
