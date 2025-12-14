@@ -316,7 +316,6 @@ Extract the data and format it as JSON with this exact structure:
 
 {
   "date_completed": null,
-  "workout_start_time": "HH:MM" or null,
   "workout_duration_minutes": number or null,
   "notes": "string or null",
   "exercises": [
