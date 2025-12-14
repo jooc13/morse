@@ -309,34 +309,39 @@ router.post('/', upload.single('audio'), async (req, res) => {
       // Save exercises
       if (workoutDataResult.workout.exercises && workoutDataResult.workout.exercises.length > 0) {
         for (const exercise of workoutDataResult.workout.exercises) {
+          // Convert reps array to single value if needed
+          const repsValue = Array.isArray(exercise.reps) && exercise.reps.length > 0
+            ? exercise.reps[0]
+            : exercise.reps || null;
+
+          // Convert weight array to single value if needed
+          const weightValue = Array.isArray(exercise.weight_lbs) && exercise.weight_lbs.length > 0
+            ? exercise.weight_lbs[0]
+            : exercise.weight_lbs || null;
+
           await client.query(`
             INSERT INTO exercises (
-              workout_id, exercise_name, exercise_type, muscle_groups,
-              sets, reps, weight_lbs, duration_minutes, distance_miles,
-              effort_level, rest_seconds, notes, order_in_workout
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+              workout_id, name, category, sets, reps, weight,
+              duration_seconds, distance, notes
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           `, [
             workoutId,
             exercise.exercise_name,
             exercise.exercise_type || 'strength',
-            exercise.muscle_groups || [],
             exercise.sets || null,
-            exercise.reps || null,
-            exercise.weight_lbs || null,
-            exercise.duration_minutes || null,
+            repsValue,
+            weightValue,
+            exercise.duration_minutes ? Math.round(exercise.duration_minutes * 60) : null,
             exercise.distance_miles || null,
-            exercise.effort_level || null,
-            exercise.rest_seconds || null,
-            exercise.notes || null,
-            exercise.order_in_workout || null
+            exercise.notes || null
           ]);
         }
       }
 
       // Update status to completed
       await client.query(
-        'UPDATE audio_files SET status = $1, processed = $2 WHERE id = $3',
-        ['completed', true, audioFileId]
+        'UPDATE audio_files SET status = $1 WHERE id = $2',
+        ['completed', audioFileId]
       );
 
         workoutResult = {
@@ -627,34 +632,39 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
     // Save exercises
     if (workoutDataResult.workout.exercises && workoutDataResult.workout.exercises.length > 0) {
       for (const exercise of workoutDataResult.workout.exercises) {
+        // Convert reps array to single value if needed
+        const repsValue = Array.isArray(exercise.reps) && exercise.reps.length > 0
+          ? exercise.reps[0]
+          : exercise.reps || null;
+
+        // Convert weight array to single value if needed
+        const weightValue = Array.isArray(exercise.weight_lbs) && exercise.weight_lbs.length > 0
+          ? exercise.weight_lbs[0]
+          : exercise.weight_lbs || null;
+
         await client.query(`
           INSERT INTO exercises (
-            workout_id, exercise_name, exercise_type, muscle_groups,
-            sets, reps, weight_lbs, duration_minutes, distance_miles,
-            effort_level, rest_seconds, notes, order_in_workout
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            workout_id, name, category, sets, reps, weight,
+            duration_seconds, distance, notes
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         `, [
           workoutId,
           exercise.exercise_name,
           exercise.exercise_type || 'strength',
-          exercise.muscle_groups || [],
           exercise.sets || null,
-          exercise.reps || null,
-          exercise.weight_lbs || null,
-          exercise.duration_minutes || null,
+          repsValue,
+          weightValue,
+          exercise.duration_minutes ? Math.round(exercise.duration_minutes * 60) : null,
           exercise.distance_miles || null,
-          exercise.effort_level || null,
-          exercise.rest_seconds || null,
-          exercise.notes || null,
-          exercise.order_in_workout || null
+          exercise.notes || null
         ]);
       }
     }
 
     // Update all audio files to completed
     await client.query(
-      `UPDATE audio_files SET status = $1, processed = $2 WHERE id = ANY($3)`,
-      ['completed', true, audioFileIds]
+      `UPDATE audio_files SET status = $1 WHERE id = ANY($2)`,
+      ['completed', audioFileIds]
     );
 
     await client.query('COMMIT');
