@@ -222,7 +222,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
 
       // Step 1: Transcribe audio
       console.log(`Transcribing audio file: ${audioFileId}`);
-      transcriptionResult = await TranscriptionService.transcribeAudio(filePath, audioFileId, deviceInfo.deviceUuid, userId, req.file.buffer);
+      transcriptionResult = await TranscriptionService.transcribeAudio(filePath, audioFileId, deviceInfo.deviceUuid, userId, req.file.buffer, originalFilename);
       
       if (!transcriptionResult.success) {
         // If it's a retryable error (like quota), mark as pending for retry
@@ -496,7 +496,7 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
 
       // Transcribe each file
       try {
-        const transcriptionResult = await TranscriptionService.transcribeAudio(filePath, audioFileId, deviceInfo.deviceUuid, userId, file.buffer);
+        const transcriptionResult = await TranscriptionService.transcribeAudio(filePath, audioFileId, deviceInfo.deviceUuid, userId, file.buffer, file.originalname);
         if (transcriptionResult.success) {
           transcriptions.push(transcriptionResult.text);
           
