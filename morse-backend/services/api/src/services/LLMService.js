@@ -97,15 +97,69 @@ class GeminiProvider extends LLMProvider {
   }
 }
 
+class OpenAIProvider extends LLMProvider {
+  constructor(apiKey) {
+    super(apiKey);
+    try {
+      const OpenAI = require('openai');
+      this.client = new OpenAI({ apiKey });
+      this.model = 'gpt-4o-mini'; // Use the most cost-effective model
+    } catch (error) {
+      console.warn('OpenAI SDK not available:', error.message);
+      this.client = null;
+    }
+  }
+
+  async generateResponse(prompt) {
+    if (!this.client) {
+      throw new Error('OpenAI provider not properly initialized');
+    }
+    try {
+      const completion = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.1,
+        max_tokens: 2000,
+      });
+      return completion.choices[0].message.content;
+    } catch (error) {
+      console.error('OpenAI API error:', error);
+
+      // Check if it's a quota or rate limit error
+      const errorMessage = error.message || '';
+      const isQuotaError = errorMessage.includes('quota') ||
+                          errorMessage.includes('rate limit') ||
+                          errorMessage.includes('insufficient_quota') ||
+                          error.status === 429 ||
+                          error.status === 402;
+
+      if (isQuotaError) {
+        error.quotaError = true;
+      }
+
+      throw error;
+    }
+  }
+
+  healthCheck() {
+    try {
+      return !!(this.apiKey && this.client);
+    } catch (error) {
+      return false;
+    }
+  }
+}
+
 class LLMService {
   constructor() {
     this.provider = this._initializeProvider();
     if (!this.provider) {
       console.error("LLM Provider initialization failed. Environment check:");
       console.error("LLM_PROVIDER:", process.env.LLM_PROVIDER);
-      console.error("GOOGLE_API_KEY present:", !!process.env.GOOGLE_API_KEY);
+      console.error("OPENAI_API_KEY present:", !!process.env.OPENAI_API_KEY);
       console.error("ANTHROPIC_API_KEY present:", !!process.env.ANTHROPIC_API_KEY);
-      throw new Error("No valid LLM provider configured. Set ANTHROPIC_API_KEY or GOOGLE_API_KEY");
+      console.error("GOOGLE_API_KEY present:", !!process.env.GOOGLE_API_KEY);
+      throw new Error("No valid LLM provider configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY");
     }
   }
 
@@ -129,13 +183,21 @@ class LLMService {
       } else {
         console.warn("GOOGLE_API_KEY not found, trying other providers");
       }
+    } else if (llmProvider === 'openai') {
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (apiKey) {
+        console.log("Using OpenAI provider");
+        return new OpenAIProvider(apiKey);
+      } else {
+        console.warn("OPENAI_API_KEY not found, trying other providers");
+      }
     } else if (llmProvider === 'auto') {
       // Auto-detect best available provider
-      // Prefer free Gemini if available
-      const googleKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-      if (googleKey) {
-        console.log("Auto-selected Google Gemini provider (free)");
-        return new GeminiProvider(googleKey);
+      // Priority: OpenAI > Claude > Gemini (due to recent Gemini key issues)
+      const openaiKey = process.env.OPENAI_API_KEY;
+      if (openaiKey) {
+        console.log("Auto-selected OpenAI provider");
+        return new OpenAIProvider(openaiKey);
       }
 
       // Fallback to Claude
@@ -143,6 +205,13 @@ class LLMService {
       if (anthropicKey) {
         console.log("Auto-selected Anthropic Claude provider");
         return new ClaudeProvider(anthropicKey);
+      }
+
+      // Last resort: Gemini
+      const googleKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+      if (googleKey) {
+        console.log("Auto-selected Google Gemini provider (last resort)");
+        return new GeminiProvider(googleKey);
       }
     }
 
@@ -176,16 +245,27 @@ class LLMService {
 
       // Check if it's a quota/rate limit error - these should be retried later
       const errorMessage = error.response?.data?.error?.message || error.message;
-      const isQuotaError = errorMessage.includes('quota') ||
+      let isQuotaError = errorMessage.includes('quota') ||
                           errorMessage.includes('rate limit') ||
-                          error.response?.status === 429;
+                          errorMessage.includes('insufficient_quota') ||
+                          error.response?.status === 429 ||
+                          error.status === 429 ||
+                          error.status === 402;
+
+      // Also check the custom quotaError flag from OpenAI provider
+      if (error.quotaError) {
+        isQuotaError = true;
+      }
 
       if (isQuotaError) {
+        const retryAfter = error.response?.data?.error?.retryAfter ||
+                          error.response?.headers?.['retry-after'] ||
+                          3600; // Default 1 hour for quota errors
         return {
           success: false,
           error: errorMessage,
           retryable: true,
-          retryAfter: error.response?.data?.error?.retryAfter || 60
+          retryAfter: retryAfter
         };
       }
 
