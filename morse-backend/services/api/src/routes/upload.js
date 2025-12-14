@@ -197,9 +197,10 @@ router.post('/', upload.single('audio'), async (req, res) => {
     let sessionDetectionResult;
     try {
       sessionDetectionResult = await sessionService.detectSession(
-        userId, 
-        audioFileId, 
-        deviceInfo.timestampDate
+        userId,
+        audioFileId,
+        deviceInfo.timestampDate,
+        deviceInfo.deviceUuid
       );
       console.log(`Session detection result:`, sessionDetectionResult);
     } catch (sessionError) {

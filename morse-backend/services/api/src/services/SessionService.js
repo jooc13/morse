@@ -12,7 +12,7 @@ class SessionService {
    * Detects if an audio file should be grouped with an existing session
    * or if a new session should be created
    */
-  async detectSession(userId, audioFileId, uploadTimestamp) {
+  async detectSession(userId, audioFileId, uploadTimestamp, deviceUuid = null) {
     const client = await this.pool.connect();
 
     try {
@@ -62,10 +62,10 @@ class SessionService {
         console.log(`Creating new session for audio file ${audioFileId}`);
 
         const newSessionResult = await client.query(`
-          INSERT INTO sessions (user_id, status, created_at, updated_at)
-          VALUES ($1, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          INSERT INTO sessions (user_id, device_uuid, status, created_at, updated_at)
+          VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
           RETURNING id
-        `, [userId]);
+        `, [userId, deviceUuid]);
 
         sessionId = newSessionResult.rows[0].id;
         isNewSession = true;
