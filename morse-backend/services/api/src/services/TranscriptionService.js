@@ -13,10 +13,10 @@ class TranscriptionService {
   /**
    * Transcribe audio file using external API
    */
-  async transcribeAudio(filePath, audioFileId, deviceUuid = null, userId = null, audioBuffer = null) {
+  async transcribeAudio(filePath, audioFileId, deviceUuid = null, userId = null, audioBuffer = null, originalFilename = null) {
     try {
       if (this.provider === 'openai') {
-        return await this.transcribeWithWhisper(filePath, audioFileId, audioBuffer);
+        return await this.transcribeWithWhisper(filePath, audioFileId, audioBuffer, originalFilename);
       } else if (this.provider === 'worker') {
         return await this.transcribeWithWorker(filePath, audioFileId, deviceUuid, userId, audioBuffer);
       } else {
@@ -31,32 +31,49 @@ class TranscriptionService {
   /**
    * Transcribe using OpenAI Whisper API
    */
-  async transcribeWithWhisper(filePath, audioFileId, audioBuffer = null) {
+  async transcribeWithWhisper(filePath, audioFileId, audioBuffer = null, originalFilename = null) {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY environment variable is required');
     }
 
     let audioFile;
     let tempFilePath = null;
+    let fileType = 'mp3'; // default
 
     try {
+      // Determine file type from original filename if available
+      if (originalFilename) {
+        const ext = require('path').extname(originalFilename).toLowerCase().substring(1);
+        if (['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm'].includes(ext)) {
+          fileType = ext;
+        }
+      }
+
       // Handle in-memory buffer
       if (filePath.startsWith('memory://') && audioBuffer) {
-        // Create a temporary file for OpenAI API
-        tempFilePath = `/tmp/temp-audio-${audioFileId}.mp3`;
+        // Create a temporary file for OpenAI API with correct extension
+        tempFilePath = `/tmp/temp-audio-${audioFileId}.${fileType}`;
         await fsPromises.writeFile(tempFilePath, audioBuffer);
         audioFile = fs.createReadStream(tempFilePath);
       } else if (Buffer.isBuffer(audioBuffer)) {
         // Direct buffer input
-        tempFilePath = `/tmp/temp-audio-${audioFileId}.mp3`;
+        tempFilePath = `/tmp/temp-audio-${audioFileId}.${fileType}`;
         await fsPromises.writeFile(tempFilePath, audioBuffer);
         audioFile = fs.createReadStream(tempFilePath);
       } else {
         // Regular file path
         audioFile = fs.createReadStream(filePath);
+
+        // If no original filename, try to get from file path
+        if (!originalFilename) {
+          const ext = require('path').extname(filePath).toLowerCase().substring(1);
+          if (['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm'].includes(ext)) {
+            fileType = ext;
+          }
+        }
       }
 
-      console.log(`Starting Whisper transcription for audio file: ${audioFileId}`);
+      console.log(`Starting Whisper transcription for audio file: ${audioFileId} (${fileType})`);
 
       const transcription = await this.openai.audio.transcriptions.create({
         file: audioFile,
