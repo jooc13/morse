@@ -343,73 +343,109 @@ const UploadTest = () => {
                       <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
                         {uploadItem.file}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        Upload Details
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-                        <Chip label={`File ID: ${result.audioFileId}`} size="small" />
-                        <Chip label={`Device: ${result.deviceUuid}`} size="small" />
-                        <Chip label={`Filename: ${result.filename}`} size="small" />
-                        <Chip 
-                          label={
-                            result.processed ? 'Workout Created' : 
-                            result.status === 'pending' ? 'Pending Retry' : 
-                            result.status === 'completed' ? 'Completed' : 
-                            result.status === 'failed' ? 'Failed' :
-                            result.queued ? 'Queued' :
-                            'Processing...'
-                          } 
-                          color={
-                            result.processed ? 'success' : 
-                            result.status === 'pending' ? 'warning' : 
-                            result.status === 'completed' ? 'success' : 
-                            result.status === 'failed' ? 'error' :
-                            result.queued ? 'info' :
-                            'info'
-                          }
-                          size="small" 
-                        />
-                        {result.workoutId && (
-                          <Chip 
-                            label={`Workout ID: ${result.workoutId.slice(0, 8)}...`} 
-                            color="primary"
-                            size="small" 
-                          />
-                        )}
-                        {result.exerciseCount > 0 && (
-                          <Chip 
-                            label={`${result.exerciseCount} exercise${result.exerciseCount === 1 ? '' : 's'}`} 
-                            color="success"
-                            size="small" 
-                          />
-                        )}
-                      </Box>
-                      
-                      {result.session && (
-                        <Box sx={{ mb: 2 }}>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Session Information
+                      {/* Display parsed workout information if available */}
+                      {result.workout && result.workout.exercises && result.workout.exercises.length > 0 && (
+                        <Box sx={{ mb: 3 }}>
+                          <Typography variant="h6" gutterBottom color="primary">
+                            🏋️ {result.workout.title || 'Workout'} Detected
                           </Typography>
-                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                            <Chip 
-                              label={`Session ID: ${result.session.sessionId}`} 
-                              size="small" 
-                            />
-                            <Chip 
-                              label={result.session.isNewSession ? 'New Session' : 'Existing Session'} 
-                              color={result.session.isNewSession ? 'primary' : 'default'}
-                              size="small" 
-                            />
-                            {result.session.timeGapMinutes > 0 && (
-                              <Chip 
-                                label={`Gap: ${result.session.timeGapMinutes}min`} 
-                                size="small" 
-                              />
-                            )}
+                          <Typography variant="body2" color="text.secondary" gutterBottom>
+                            Found {result.workout.exercises.length} exercise{result.workout.exercises.length === 1 ? '' : 's'} in your audio
+                          </Typography>
+
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            {result.workout.exercises.map((exercise, idx) => (
+                              <Card key={idx} variant="outlined" sx={{ backgroundColor: 'background.default' }}>
+                                <CardContent sx={{ py: 2 }}>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 1 }}>
+                                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                                      {exercise.name || exercise.exercise_name}
+                                    </Typography>
+                                    <Chip
+                                      label={exercise.category || exercise.exercise_type || 'Strength'}
+                                      size="small"
+                                      color="primary"
+                                      variant="outlined"
+                                    />
+                                  </Box>
+
+                                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mt: 1 }}>
+                                    {exercise.sets && (
+                                      <Typography variant="body2" color="text.secondary">
+                                        <strong>Sets:</strong> {exercise.sets}
+                                      </Typography>
+                                    )}
+                                    {exercise.reps && (
+                                      <Typography variant="body2" color="text.secondary">
+                                        <strong>Reps:</strong> {exercise.reps}
+                                      </Typography>
+                                    )}
+                                    {exercise.weight && (
+                                      <Typography variant="body2" color="text.secondary">
+                                        <strong>Weight:</strong> {exercise.weight} lbs
+                                      </Typography>
+                                    )}
+                                    {exercise.duration_seconds && (
+                                      <Typography variant="body2" color="text.secondary">
+                                        <strong>Duration:</strong> {Math.floor(exercise.duration_seconds / 60)}m {exercise.duration_seconds % 60}s
+                                      </Typography>
+                                    )}
+                                  </Box>
+
+                                  {exercise.notes && (
+                                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontStyle: 'italic' }}>
+                                      {exercise.notes}
+                                    </Typography>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            ))}
                           </Box>
                         </Box>
                       )}
 
+                      {/* Show minimal upload info */}
+                      <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          Upload Details
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                          <Chip
+                            label={
+                              result.processed ? '✓ Workout Created' :
+                              result.status === 'pending' ? '⏳ Pending' :
+                              result.status === 'completed' ? '✓ Completed' :
+                              result.status === 'failed' ? '✗ Failed' :
+                              result.queued ? '⏸️ Queued' :
+                              '⏳ Processing...'
+                            }
+                            color={
+                              result.processed ? 'success' :
+                              result.status === 'pending' ? 'warning' :
+                              result.status === 'completed' ? 'success' :
+                              result.status === 'failed' ? 'error' :
+                              result.queued ? 'info' :
+                              'info'
+                            }
+                            size="small"
+                          />
+                          {result.session?.isNewSession && (
+                            <Chip
+                              label="🆕 New Session Started"
+                              color="primary"
+                              size="small"
+                            />
+                          )}
+                          {result.session?.timeGapMinutes > 0 && (
+                            <Chip
+                              label={`${result.session.timeGapMinutes}min since last workout`}
+                              size="small"
+                              variant="outlined"
+                            />
+                          )}
+                        </Box>
+                      </Box>
+  
                       {status && (
                         <Box>
                           <Typography variant="body2" color="text.secondary" gutterBottom>

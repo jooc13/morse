@@ -346,7 +346,8 @@ router.post('/', upload.single('audio'), async (req, res) => {
 
         workoutResult = {
           workoutId,
-          exerciseCount: workoutDataResult.workout.exercises?.length || 0
+          exerciseCount: workoutDataResult.workout.exercises?.length || 0,
+          workout: workoutDataResult.workout
         };
 
         console.log(`Successfully processed audio file ${audioFileId} -> workout ${workoutId}`);
@@ -375,6 +376,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
       processed: workoutResult !== null,
       workoutId: workoutResult?.workoutId || null,
       exerciseCount: workoutResult?.exerciseCount || 0,
+      workout: workoutResult?.workout || null, // Include full workout details
       deviceUuid: deviceInfo.deviceUuid,
       queued: false, // Processing happens directly, not queued
       status: processingStatus,
