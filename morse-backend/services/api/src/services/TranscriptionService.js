@@ -35,10 +35,10 @@ class TranscriptionService {
       throw new Error('OPENAI_API_KEY environment variable is required');
     }
 
-    try {
-      let audioFile;
-      let tempFilePath = null;
+    let audioFile;
+    let tempFilePath = null;
 
+    try {
       // Handle in-memory buffer
       if (filePath.startsWith('memory://') && audioBuffer) {
         // Create a temporary file for OpenAI API
