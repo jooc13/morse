@@ -1,9 +1,8 @@
 const express = require('express');
 const { Pool } = require('pg');
-const SessionService = require('../services/SessionService');
+const sessionService = require('../services/SessionService');
 
 const router = express.Router();
-const sessionService = new SessionService();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/morse_db',
