@@ -288,12 +288,13 @@ router.post('/', upload.single('audio'), async (req, res) => {
       
       const workoutInsert = await client.query(`
         INSERT INTO workouts (
-          user_id, audio_file_id, transcription_id, date_completed,
+          user_id, device_uuid, audio_file_id, transcription_id, date_completed,
           duration_seconds, total_exercises, notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id
       `, [
         userId,
+        deviceInfo.deviceUuid,
         audioFileId,
         transcriptionId,
         workoutDate,
@@ -607,12 +608,13 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
     
     const workoutInsert = await client.query(`
       INSERT INTO workouts (
-        user_id, audio_file_id, transcription_id, date_completed,
+        user_id, device_uuid, audio_file_id, transcription_id, date_completed,
         duration_seconds, total_exercises, notes
-      ) VALUES ($1, $2, NULL, $3, $4, $5, $6)
+      ) VALUES ($1, $2, $3, NULL, $4, $5, $6, $7)
       RETURNING id
     `, [
       userId,
+      deviceInfo.deviceUuid,
       audioFileIds[0], // Use first audio file as primary
       workoutDate,
       (workoutDataResult.workout.workout_duration_minutes || 0) * 60, // Convert minutes to seconds
