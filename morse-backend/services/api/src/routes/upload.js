@@ -289,7 +289,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
       const workoutInsert = await client.query(`
         INSERT INTO workouts (
           user_id, audio_file_id, transcription_id, date_completed,
-          workout_duration_minutes, total_exercises, notes
+          duration_seconds, total_exercises, notes
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
       `, [
@@ -297,7 +297,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
         audioFileId,
         transcriptionId,
         workoutDate,
-        workoutDataResult.workout.workout_duration_minutes || null,
+        (workoutDataResult.workout.workout_duration_minutes || 0) * 60, // Convert minutes to seconds
         workoutDataResult.workout.exercises?.length || 0,
         workoutDataResult.workout.notes || null
       ]);
@@ -608,14 +608,14 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
     const workoutInsert = await client.query(`
       INSERT INTO workouts (
         user_id, audio_file_id, transcription_id, date_completed,
-        workout_duration_minutes, total_exercises, notes
+        duration_seconds, total_exercises, notes
       ) VALUES ($1, $2, NULL, $3, $4, $5, $6)
       RETURNING id
     `, [
       userId,
       audioFileIds[0], // Use first audio file as primary
       workoutDate,
-      workoutDataResult.workout.workout_duration_minutes || null,
+      (workoutDataResult.workout.workout_duration_minutes || 0) * 60, // Convert minutes to seconds
       workoutDataResult.workout.exercises?.length || 0,
       workoutDataResult.workout.notes || null
     ]);
