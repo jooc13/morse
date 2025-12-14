@@ -315,7 +315,7 @@ The transcription may contain:
 Extract the data and format it as JSON with this exact structure:
 
 {
-  "workout_date": null,
+  "date_completed": null,
   "workout_start_time": "HH:MM" or null,
   "workout_duration_minutes": number or null,
   "notes": "string or null",
@@ -344,7 +344,7 @@ Guidelines:
 4. Handle fragmented speech - if someone says "5 sets 185lbs bench press 4 sets", interpret as "bench press, 4 sets, 185lbs"
 5. When numbers appear without clear context, use workout knowledge to assign them (e.g., "bench press 185 5" = 5 reps at 185lbs)
 6. If weight varies per set, include all weights in weight_lbs array
-7. Do not extract workout dates - always set workout_date to null
+7. Do not extract workout dates - always set date_completed to null
 8. Estimate effort level from descriptive words (easy=3-4, moderate=5-6, hard=7-8, very hard=9-10)
 9. Order exercises as they appear in the transcription
 10. If unclear about data, use null rather than guessing
@@ -388,7 +388,7 @@ Respond with ONLY the JSON object, no additional text or explanation.`;
   _validateWorkoutData(data) {
     try {
       // Set defaults - always use today's date for new uploads
-      data.workout_date = new Date().toISOString().split('T')[0];
+      data.date_completed = new Date().toISOString().split('T')[0];
 
       if (!data.exercises) {
         data.exercises = [];
