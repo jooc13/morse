@@ -289,7 +289,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
       
       const workoutInsert = await client.query(`
         INSERT INTO workouts (
-          user_id, audio_file_id, transcription_id, workout_date, 
+          user_id, audio_file_id, transcription_id, date_completed,
           workout_start_time, workout_duration_minutes, total_exercises, notes
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id
@@ -610,7 +610,7 @@ router.post('/batch', batchUpload.array('audio', 20), async (req, res) => {
     
     const workoutInsert = await client.query(`
       INSERT INTO workouts (
-        user_id, audio_file_id, transcription_id, workout_date, 
+        user_id, audio_file_id, transcription_id, date_completed,
         workout_start_time, workout_duration_minutes, total_exercises, notes
       ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
       RETURNING id
