@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "morse.fullname" . }}-db-init
+  labels:
+    {{- include "morse.labels" . | nindent 4 }}
+data:
+  001_initial_schema.sql: |
+    -- Initial database schema for Morse workout tracking application
+
+    -- Extension for UUID generation
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+    -- Users table (device-based authentication)
+    CREATE TABLE users (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        device_uuid VARCHAR(255) UNIQUE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        total_workouts INTEGER DEFAULT 0
+    );
+
+    -- Audio files table
+    CREATE TABLE audio_files (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        original_filename VARCHAR(255) NOT NULL,
+        file_path VARCHAR(500) NOT NULL,
+        file_size BIGINT NOT NULL,
+        duration_seconds DECIMAL(10,2),
+        upload_timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        processed BOOLEAN DEFAULT FALSE,
+        transcription_status VARCHAR(50) DEFAULT 'pending' -- pending, processing, completed, failed
+    );
+
+    -- Index for efficient queries
+    CREATE INDEX idx_audio_files_user_id ON audio_files(user_id);
+    CREATE INDEX idx_audio_files_processed ON audio_files(processed);
+    CREATE INDEX idx_audio_files_upload_timestamp ON audio_files(upload_timestamp);
+    CREATE INDEX idx_users_device_uuid ON users(device_uuid);
+
+    -- Transcriptions table
+    CREATE TABLE transcriptions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+        raw_text TEXT NOT NULL,
+        confidence_score DECIMAL(3,2),
+        processing_time_seconds DECIMAL(10,2),
+        processing_time_ms DECIMAL(10,2),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Workouts table
+    CREATE TABLE workouts (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        audio_file_id UUID NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+        transcription_id UUID REFERENCES transcriptions(id) ON DELETE SET NULL,
+        workout_date DATE NOT NULL,
+        workout_start_time TIME,
+        workout_duration_minutes INTEGER,
+        total_exercises INTEGER DEFAULT 0,
+        notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Exercises table
+    CREATE TABLE exercises (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        workout_id UUID NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+        exercise_name VARCHAR(255) NOT NULL,
+        exercise_type VARCHAR(100), -- strength, cardio, flexibility, etc.
+        muscle_groups TEXT[], -- array of muscle groups
+        sets INTEGER,
+        reps INTEGER[],
+        weight_lbs DECIMAL[],
+        duration_minutes DECIMAL(10,2),
+        distance_miles DECIMAL(10,2),
+        effort_level INTEGER CHECK (effort_level >= 1 AND effort_level <= 10),
+        rest_seconds INTEGER,
+        notes TEXT,
+        order_in_workout INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- User progress tracking table
+    CREATE TABLE user_progress (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        workout_id UUID NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+        exercise_name VARCHAR(255) NOT NULL,
+        metric_type VARCHAR(50) NOT NULL, -- weight, reps, duration, distance, etc.
+        metric_value DECIMAL(10,2) NOT NULL,
+        recorded_date DATE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Additional indexes for better performance
+    CREATE INDEX idx_transcriptions_audio_file_id ON transcriptions(audio_file_id);
+    CREATE INDEX idx_workouts_user_id ON workouts(user_id);
+    CREATE INDEX idx_workouts_date ON workouts(workout_date);
+    CREATE INDEX idx_exercises_workout_id ON exercises(workout_id);
+    CREATE INDEX idx_exercises_name ON exercises(exercise_name);
+    CREATE INDEX idx_exercises_muscle_groups ON exercises USING GIN(muscle_groups);
+    CREATE INDEX idx_user_progress_user_id ON user_progress(user_id);
+    CREATE INDEX idx_user_progress_exercise ON user_progress(exercise_name);
+    CREATE INDEX idx_user_progress_date ON user_progress(recorded_date);
+
+    -- Update audio_files table to set processed status for completed transcriptions
+    CREATE INDEX idx_audio_files_transcription_status ON audio_files(transcription_status);
