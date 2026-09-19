@@ -169,7 +169,7 @@ env:
 # Secrets
 secrets:
   anthropicApiKey: ""  # Deprecated - no longer used
-  googleGeminiApiKey: "your-google-api-key-here"  # Add your Gemini API key here
+  googleGeminiApiKey: ""  # Set via secret manager in production
 
 # Node Selector
 nodeSelector: {}
